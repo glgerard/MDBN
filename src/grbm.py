@@ -33,13 +33,13 @@ class GRBM(object):
     def v_sample(self, h):
         # Derive a sample of visible units from the hidden units h
         mu = self.b + self.sigma * T.dot(h,self.W)
-        return self.srng.normal(size=mu.shape,avg=mu, std=self.sigma)
+        return self.srng.normal(size=mu.shape,avg=mu, std=self.sigma, dtype=theano.config.floatX)
 
     def h_sample(self, v):
         # Derive a sample of hidden units from the visible units v
         activation = T.dot(v,self.W.T) + self.a
         prob = T.nnet.sigmoid(activation)
-        return self.srng.binomial(size=activation.shape,n=1,p=prob)
+        return self.srng.binomial(size=activation.shape,n=1,p=prob,dtype=theano.config.floatX)
 
     def gibbs_update(self, h):
         # Negative phase
@@ -114,25 +114,30 @@ def load_MNIST():
 def test():
     n_data, input_size, dataset, levels, targets = load_MNIST()
 
+    index = T.lscalar('index')
     x = T.matrix('x')
     print("Building an RPM with %i visible inputs and %i hidden units" % (input_size, levels))
     rbm = GRBM(input_size, levels, x)
 
     updates = rbm.CD()
 
-    index = T.lscalar()
+    train_set = theano.shared(dataset)
+
     train = theano.function(
         inputs=[index],
         updates=updates,
         givens={
-            x: dataset[index*20 : (index+1)*20]
+            x: train_set[index*20 : (index+1)*20]
         },
         name="train"
     )
 
-    for i in xrange(1000):
+    for i in xrange(10):
         for n_batch in xrange(n_data//20):
             train(n_batch)
 
+    print(rbm.a)
+    print(rbm.b)
+    
 if __name__ == '__main__':
     test()
