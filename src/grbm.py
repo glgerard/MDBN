@@ -3,6 +3,7 @@ import theano
 from theano import tensor as T
 from theano.tensor.shared_randomstreams import RandomStreams
 import struct
+import scipy.misc
 
 class GRBM(object):
     def __init__(self, n_visible, n_hidden, input):
@@ -11,14 +12,17 @@ class GRBM(object):
         self.input = input
 
         # Rescale terms for visible units
-        self.a = theano.shared(value=np.zeros((n_visible,1),dtype=theano.config.floatX),
-                               name='a')
-        # Bias terms for hidden units
-        self.b = theano.shared(np.zeros((n_hidden,1),dtype=theano.config.floatX),
+        self.b = theano.shared(value=np.zeros(n_visible,dtype=theano.config.floatX),
+                               borrow=True,
                                name='b')
+        # Bias terms for hidden units
+        self.a= theano.shared(np.zeros(n_hidden,dtype=theano.config.floatX),
+                               borrow=True,
+                               name='a')
         # Rescale terms for visible units
-        self.sigma = theano.shared(np.ones((n_hidden,1),dtype=theano.config.floatX),
-                               name='sigma')
+        self.sigma = theano.shared(np.ones(n_visible,dtype=theano.config.floatX),
+                                borrow=True,
+                                name='sigma')
         # Weights
         rng = np.random.RandomState(2468)
         self.W = theano.shared(np.asarray(
@@ -32,22 +36,22 @@ class GRBM(object):
 
     def v_sample(self, h):
         # Derive a sample of visible units from the hidden units h
-        mu = self.b + self.sigma * T.dot(h,self.W)
+        mu = self.b + self.sigma * T.dot(h,self.W.T)
         return self.srng.normal(size=mu.shape,avg=mu, std=self.sigma, dtype=theano.config.floatX)
 
     def h_sample(self, v):
         # Derive a sample of hidden units from the visible units v
-        activation = T.dot(v,self.W.T) + self.a
-        prob = T.nnet.sigmoid(activation)
+        activation = T.dot(v/self.sigma,self.W) + self.a
+        prob = T.nnet.sigmoid(-activation)
         return self.srng.binomial(size=activation.shape,n=1,p=prob,dtype=theano.config.floatX)
 
     def gibbs_update(self, h):
-        # Negative phase
+        # A Gibbs step
         nv_sample = self.v_sample(h)
         nh_sample = self.h_sample(nv_sample)
         return [nv_sample, nh_sample]
 
-    def CD(self, k=1, eps=0.1):
+    def CD(self, k=1, eps=0.005):
         # Positive phase
         h0_sample = self.h_sample(self.input)
 
@@ -59,17 +63,17 @@ class GRBM(object):
         vK_sample = nv_samples[-1]
         hK_sample = nh_samples[-1]
 
-        w_grad = T.dot(self.input.T, h0_sample.T) - T.dot(vK_sample.T, hK_sample.T)
+        w_grad = T.dot(self.input.T, h0_sample) - T.dot(vK_sample.T, hK_sample)
 
-        a_grad = self.input - vK_sample
+        b_grad = T.sum(self.input - vK_sample, axis=0)
 
-        b_grad = h0_sample - hK_sample
+        a_grad = T.sum(h0_sample - hK_sample, axis=0)
 
-        params = [self.W, self.a, self.b]
-        gparams = [w_grad, a_grad, b_grad]
+        params = [self.a, self.b, self.W]
+        gparams = [a_grad, b_grad, w_grad]
 
         for param, gparam in zip(params, gparams):
-            updates[param] = param + T.cast(eps,dtype=theano.config.floatX)*gparam
+            updates[param] = param - gparam * T.cast(eps,dtype=theano.config.floatX)
 
         return updates
 
@@ -111,7 +115,8 @@ def load_MNIST():
 
     return [n_images, img_size, images, n_levels, labels]
 
-def test():
+def test(batch_size = 20, training_epochs = 15):
+
     n_data, input_size, dataset, levels, targets = load_MNIST()
 
     index = T.lscalar('index')
@@ -121,23 +126,23 @@ def test():
 
     updates = rbm.CD()
 
-    train_set = theano.shared(dataset)
+    train_set = theano.shared(dataset, borrow=True)
 
     train = theano.function(
         inputs=[index],
         updates=updates,
         givens={
-            x: train_set[index*20 : (index+1)*20]
+            x: train_set[index*batch_size : (index+1)*batch_size]
         },
         name="train"
     )
 
-    for i in xrange(10):
-        for n_batch in xrange(n_data//20):
+    for epoch in xrange(training_epochs):
+        print("Training epoch %i" % epoch)
+        for n_batch in xrange(n_data//batch_size):
             train(n_batch)
+        # Construct image from the weight matrix
+            scipy.misc.imsave('filters_at_epoch_%i.png' % epoch,rbm.W.get_value(borrow=True).T)
 
-    print(rbm.a)
-    print(rbm.b)
-    
 if __name__ == '__main__':
     test()
