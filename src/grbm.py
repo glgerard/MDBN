@@ -16,7 +16,7 @@ class GRBM(object):
                                borrow=True,
                                name='b')
         # Bias terms for hidden units
-        self.a= theano.shared(np.zeros(n_hidden,dtype=theano.config.floatX),
+        self.a = theano.shared(np.zeros(n_hidden,dtype=theano.config.floatX),
                                borrow=True,
                                name='a')
         # Rescale terms for visible units
@@ -37,12 +37,12 @@ class GRBM(object):
     def v_sample(self, h):
         # Derive a sample of visible units from the hidden units h
         mu = self.b + self.sigma * T.dot(h,self.W.T)
-        return self.srng.normal(size=mu.shape,avg=mu, std=self.sigma, dtype=theano.config.floatX)
+        return self.srng.normal(size=mu.shape,avg=mu, std=self.sigma*self.sigma, dtype=theano.config.floatX)
 
     def h_sample(self, v):
         # Derive a sample of hidden units from the visible units v
-        activation = T.dot(v/self.sigma,self.W) + self.a
-        prob = T.nnet.sigmoid(-activation)
+        activation = self.a + T.dot(v/self.sigma,self.W)
+        prob = T.nnet.sigmoid(activation)
         return self.srng.binomial(size=activation.shape,n=1,p=prob,dtype=theano.config.floatX)
 
     def gibbs_update(self, h):
@@ -51,7 +51,8 @@ class GRBM(object):
         nh_sample = self.h_sample(nv_sample)
         return [nv_sample, nh_sample]
 
-    def CD(self, k=1, eps=0.005):
+    def CD(self, k=1, eps=0.1):
+        # Contrastive divergence
         # Positive phase
         h0_sample = self.h_sample(self.input)
 
@@ -63,17 +64,21 @@ class GRBM(object):
         vK_sample = nv_samples[-1]
         hK_sample = nh_samples[-1]
 
-        w_grad = T.dot(self.input.T, h0_sample) - T.dot(vK_sample.T, hK_sample)
+        # See https://www.cs.toronto.edu/~kriz/learning-features-2009-TR.pdf
+        # I keep sigma at unity as reported in https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf 13.2
 
-        b_grad = T.sum(self.input - vK_sample, axis=0)
+        w_grad = (T.dot(self.input.T, h0_sample) - T.dot(vK_sample.T, hK_sample))/\
+                 T.cast(self.input.shape[0],dtype=theano.config.floatX)
 
-        a_grad = T.sum(h0_sample - hK_sample, axis=0)
+        b_grad = T.mean(self.input - vK_sample, axis=0)
+
+        a_grad = T.mean(h0_sample - hK_sample, axis=0)
 
         params = [self.a, self.b, self.W]
         gparams = [a_grad, b_grad, w_grad]
 
         for param, gparam in zip(params, gparams):
-            updates[param] = param - gparam * T.cast(eps,dtype=theano.config.floatX)
+            updates[param] = param + gparam * T.cast(eps,dtype=theano.config.floatX)
 
         return updates
 
@@ -95,6 +100,9 @@ def load_MNIST():
             image = struct.unpack("B"*img_size, data[16+i*img_size:16+(i+1)*img_size])
             images[i] = list(image)
 
+        # Renormalize (see https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf 13.2)
+        images = images / np.std(images,axis=1,keepdims=True)
+
     # Read the labels
     with open('../data/train-labels-idx1-ubyte') as file:
         data = file.read()
@@ -108,10 +116,6 @@ def load_MNIST():
             labels[i] = list(label)
 
         n_levels = np.int(np.max(labels)-np.min(labels)+1)
-
-    # print("Data example")
-    # print(np.reshape(images[0],(n_row,n_col)))
-    # print(labels[0])
 
     return [n_images, img_size, images, n_levels, labels]
 
@@ -141,8 +145,9 @@ def test(batch_size = 20, training_epochs = 15):
         print("Training epoch %i" % epoch)
         for n_batch in xrange(n_data//batch_size):
             train(n_batch)
+
         # Construct image from the weight matrix
-            scipy.misc.imsave('filters_at_epoch_%i.png' % epoch,rbm.W.get_value(borrow=True).T)
+        scipy.misc.imsave('filters_at_epoch_%i.png' % epoch,rbm.W.get_value(borrow=True).T)
 
 if __name__ == '__main__':
     test()
