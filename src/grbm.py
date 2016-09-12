@@ -80,7 +80,8 @@ class GRBM(object):
         for param, gparam in zip(params, gparams):
             updates[param] = param + gparam * T.cast(eps,dtype=theano.config.floatX)
 
-        return updates
+        dist = T.sum(T.sqr(self.input - vK_sample))
+        return dist, updates
 
 def load_MNIST():
     #  http://yann.lecun.com/exdb/mnist/
@@ -101,6 +102,7 @@ def load_MNIST():
             images[i] = list(image)
 
         # Renormalize (see https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf 13.2)
+        images = images-np.mean(images,axis=1,keepdims=True)
         images = images / np.std(images,axis=1,keepdims=True)
 
     # Read the labels
@@ -128,12 +130,13 @@ def test(batch_size = 20, training_epochs = 15):
     print("Building an RPM with %i visible inputs and %i hidden units" % (input_size, levels))
     rbm = GRBM(input_size, levels, x)
 
-    updates = rbm.CD()
+    dist, updates = rbm.CD(k=1)
 
     train_set = theano.shared(dataset, borrow=True)
 
     train = theano.function(
-        inputs=[index],
+        [index],
+        dist,
         updates=updates,
         givens={
             x: train_set[index*batch_size : (index+1)*batch_size]
@@ -142,9 +145,12 @@ def test(batch_size = 20, training_epochs = 15):
     )
 
     for epoch in xrange(training_epochs):
-        print("Training epoch %i" % epoch)
+        dist = []
         for n_batch in xrange(n_data//batch_size):
-            train(n_batch)
+            dist += [train(n_batch)]
+        # print(rbm.a.get_value())
+
+        print("Training epoch %d, mean batch reconstructed distance %f" % (epoch, np.mean(dist)))
 
         # Construct image from the weight matrix
         scipy.misc.imsave('filters_at_epoch_%i.png' % epoch,rbm.W.get_value(borrow=True).T)
