@@ -48,7 +48,8 @@ class GRBM(object):
         return [prob, self.srng.binomial(size=activation.shape,n=1,p=prob,dtype=theano.config.floatX)]
 
     def output(self):
-        return self.self.h_sample(self.input)
+        prob, hS = self.h_sample(self.input)
+        return prob
 
     def gibbs_update(self, h):
         # A Gibbs step
@@ -163,8 +164,7 @@ def test(batch_size = 20, training_epochs = 15, k=1):
     for epoch in xrange(training_epochs):
         dist = []
         for n_batch in xrange(n_data//batch_size):
-            dist += [train(n_batch)]
-        # print(rbm.a.get_value())
+            dist.append(train(n_batch))
 
         print("Training epoch %d, mean batch reconstructed distance %f" % (epoch, np.mean(dist)))
 
