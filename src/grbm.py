@@ -6,30 +6,32 @@ import struct
 import scipy.misc
 
 class GRBM(object):
-    def __init__(self, n_visible, n_hidden, input):
-        self.n_visible = n_visible
-        self.n_hidden = n_hidden
+    # Implement a Gaussian-Bernoulli Restricted Boltzmann Machine
+
+    def __init__(self, input, n_input, n_hidden):
         self.input = input
+        self.n_input = n_input
+        self.n_hidden = n_hidden
 
         # Rescale terms for visible units
-        self.b = theano.shared(value=np.zeros(n_visible,dtype=theano.config.floatX),
+        self.b = theano.shared(value=np.zeros(self.n_input, dtype=theano.config.floatX),
                                borrow=True,
                                name='b')
         # Bias terms for hidden units
-        self.a = theano.shared(np.zeros(n_hidden,dtype=theano.config.floatX),
+        self.a = theano.shared(np.zeros(self.n_hidden,dtype=theano.config.floatX),
                                borrow=True,
                                name='a')
         # Rescale terms for visible units
-        self.sigma = theano.shared(np.ones(n_visible,dtype=theano.config.floatX),
-                                borrow=True,
-                                name='sigma')
+        self.sigma = theano.shared(np.ones(self.n_input, dtype=theano.config.floatX),
+                                   borrow=True,
+                                   name='sigma')
         # Weights
         rng = np.random.RandomState(2468)
         self.W = theano.shared(np.asarray(
                     rng.uniform(
-                            -4 * np.sqrt(6. / (n_hidden + n_visible)),
-                            4 * np.sqrt(6. / (n_hidden + n_visible)),
-                            (n_visible, n_hidden)
+                            -4 * np.sqrt(6. / (self.n_hidden + self.n_input)),
+                            4 * np.sqrt(6. / (self.n_hidden + self.n_input)),
+                            (self.n_input, self.n_hidden)
                         ),dtype=theano.config.floatX),
                     name='W')
         self.srng = RandomStreams(rng.randint(2 ** 30))
@@ -37,42 +39,55 @@ class GRBM(object):
     def v_sample(self, h):
         # Derive a sample of visible units from the hidden units h
         mu = self.b + self.sigma * T.dot(h,self.W.T)
-        return self.srng.normal(size=mu.shape,avg=mu, std=self.sigma*self.sigma, dtype=theano.config.floatX)
+        return [mu, self.srng.normal(size=mu.shape, avg=mu, std=self.sigma*self.sigma, dtype=theano.config.floatX)]
 
     def h_sample(self, v):
         # Derive a sample of hidden units from the visible units v
         activation = self.a + T.dot(v/self.sigma,self.W)
         prob = T.nnet.sigmoid(activation)
-        return self.srng.binomial(size=activation.shape,n=1,p=prob,dtype=theano.config.floatX)
+        return [prob, self.srng.binomial(size=activation.shape,n=1,p=prob,dtype=theano.config.floatX)]
+
+    def output(self):
+        return self.self.h_sample(self.input)
 
     def gibbs_update(self, h):
         # A Gibbs step
-        nv_sample = self.v_sample(h)
-        nh_sample = self.h_sample(nv_sample)
-        return [nv_sample, nh_sample]
+        nv_prob, nv_sample = self.v_sample(h)
+        nh_prob, nh_sample = self.h_sample(nv_sample)
+        return [nv_prob, nv_sample, nh_prob, nh_sample]
+
+    def alt_gibbs_update(self, v):
+        # A Gibbs step
+        nh_prob, nh_sample = self.h_sample(v)
+        nv_prob, nv_sample = self.v_sample(nh_sample)
+        return [nv_prob, nv_sample, nh_prob, nh_sample]
 
     def CD(self, k=1, eps=0.1):
         # Contrastive divergence
         # Positive phase
-        h0_sample = self.h_sample(self.input)
+        h0_prob, h0_sample = self.h_sample(self.input)
 
         # Negative phase
-        ( [ nv_samples,
+        ( [ nv_probs,
+            nv_samples,
+            nh_probs,
             nh_samples],
           updates) = theano.scan(self.gibbs_update,outputs_info=[None, h0_sample],n_steps=k,name="gibbs_update")
 
+        vK_prob = nv_probs[-1]
         vK_sample = nv_samples[-1]
+        hK_prob = nh_probs[-1]
         hK_sample = nh_samples[-1]
 
         # See https://www.cs.toronto.edu/~kriz/learning-features-2009-TR.pdf
-        # I keep sigma at unity as reported in https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf 13.2
+        # I keep sigma unit as reported in https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf 13.2
 
-        w_grad = (T.dot(self.input.T, h0_sample) - T.dot(vK_sample.T, hK_sample))/\
+        w_grad = (T.dot(self.input.T, h0_prob) - T.dot(vK_prob.T, hK_prob))/\
                  T.cast(self.input.shape[0],dtype=theano.config.floatX)
 
-        b_grad = T.mean(self.input - vK_sample, axis=0)
+        b_grad = T.mean(self.input - vK_prob, axis=0)
 
-        a_grad = T.mean(h0_sample - hK_sample, axis=0)
+        a_grad = T.mean(h0_prob - hK_prob, axis=0)
 
         params = [self.a, self.b, self.W]
         gparams = [a_grad, b_grad, w_grad]
@@ -80,7 +95,7 @@ class GRBM(object):
         for param, gparam in zip(params, gparams):
             updates[param] = param + gparam * T.cast(eps,dtype=theano.config.floatX)
 
-        dist = T.sum(T.sqr(self.input - vK_sample))
+        dist = T.sum(T.sqr(self.input - vK_prob))
         return dist, updates
 
 def load_MNIST():
@@ -101,7 +116,8 @@ def load_MNIST():
             image = struct.unpack("B"*img_size, data[16+i*img_size:16+(i+1)*img_size])
             images[i] = list(image)
 
-        # Renormalize (see https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf 13.2)
+        # Normalize the images to have zero mean and unit standar
+        # deviation (see https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf 13.2)
         images = images-np.mean(images,axis=1,keepdims=True)
         images = images / np.std(images,axis=1,keepdims=True)
 
@@ -121,16 +137,16 @@ def load_MNIST():
 
     return [n_images, img_size, images, n_levels, labels]
 
-def test(batch_size = 20, training_epochs = 15):
+def test(batch_size = 20, training_epochs = 15, k=1):
 
     n_data, input_size, dataset, levels, targets = load_MNIST()
 
     index = T.lscalar('index')
     x = T.matrix('x')
     print("Building an RPM with %i visible inputs and %i hidden units" % (input_size, levels))
-    rbm = GRBM(input_size, levels, x)
+    rbm = GRBM(x, input_size, levels)
 
-    dist, updates = rbm.CD(k=1)
+    dist, updates = rbm.CD(k)
 
     train_set = theano.shared(dataset, borrow=True)
 
@@ -155,5 +171,26 @@ def test(batch_size = 20, training_epochs = 15):
         # Construct image from the weight matrix
         scipy.misc.imsave('filters_at_epoch_%i.png' % epoch,rbm.W.get_value(borrow=True).T)
 
+    vis_sample = theano.shared(np.asarray(dataset[1000:1010],dtype=theano.config.floatX))
+    ( [ nv_probs,
+        nv_samples,
+        nh_probs,
+        nh_samples],
+        updates) = theano.scan(rbm.alt_gibbs_update,outputs_info=[None, vis_sample, None, None],
+                                 n_steps=1000,
+                                 name="alt_gibbs_update")
+
+    run_gibbs = theano.function(
+            [],
+            [nv_samples[-1]],
+            updates=updates,
+            name="run_gibbs"
+        )
+
+    run_gibbs()
+
+    # scipy.misc.imsave('input.png',vis_sample.get_value(borrow=True)[0])
+    # scipy.misc.imsave('output.png',nv_samples.get_value(borrow=True)[-1,0])
+
 if __name__ == '__main__':
-    test()
+    test(training_epochs=10)
