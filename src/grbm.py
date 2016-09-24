@@ -63,7 +63,7 @@ class GRBM(object):
         nv_prob, nv_sample = self.v_sample(nh_sample)
         return [nv_prob, nv_sample, nh_prob, nh_sample]
 
-    def CD(self, k=1, eps=0.1):
+    def CD(self, k=1, eps=0.05):
         # Contrastive divergence
         # Positive phase
         h0_prob, h0_sample = self.h_sample(self.input)
@@ -136,16 +136,32 @@ def load_MNIST():
 
         n_levels = np.int(np.max(labels)-np.min(labels)+1)
 
-    return [n_images, img_size, images, n_levels, labels]
+    return [n_images, n_row, n_col, images, n_levels, labels]
 
-def test(batch_size = 20, training_epochs = 15, k=1):
+def create_image(X, img_row, img_col, n_hidden):
+    X=X.T
+    n_tiles = int(np.sqrt(n_hidden))+1
+    img_gap_row = img_row + 1
+    img_gap_col = img_col + 1
+    Y = np.zeros((n_tiles * img_gap_row, n_tiles * img_gap_col), dtype=theano.config.floatX)
+    for r in xrange(n_tiles):
+        for c in xrange(n_tiles):
+            if (r*n_tiles + c) < n_hidden:
+                Y[r*img_gap_row:(r + 1) * img_gap_row - 1, c * img_gap_col:(c + 1) * img_gap_col - 1] =\
+                    X[r * n_tiles + c].reshape(img_row, img_col)
+            else:
+                break
+    return Y
 
-    n_data, input_size, dataset, levels, targets = load_MNIST()
+def test(batch_size = 20, training_epochs = 15, k=1, n_hidden=200):
+
+    n_data, n_row, n_col, dataset, levels, targets = load_MNIST()
+    n_visible = n_row * n_col
 
     index = T.lscalar('index')
     x = T.matrix('x')
-    print("Building an RPM with %i visible inputs and %i hidden units" % (input_size, levels))
-    rbm = GRBM(x, input_size, levels)
+    print("Building an RBM with %i visible inputs and %i hidden units" % (n_visible, n_hidden))
+    rbm = GRBM(x, n_visible, n_hidden)
 
     dist, updates = rbm.CD(k)
 
@@ -169,7 +185,8 @@ def test(batch_size = 20, training_epochs = 15, k=1):
         print("Training epoch %d, mean batch reconstructed distance %f" % (epoch, np.mean(dist)))
 
         # Construct image from the weight matrix
-        scipy.misc.imsave('filters_at_epoch_%i.png' % epoch,rbm.W.get_value(borrow=True).T)
+        Wimg = create_image(rbm.W.get_value(borrow=True),n_row,n_col,n_hidden)
+        scipy.misc.imsave('filters_at_epoch_%i.png' % epoch,Wimg)
 
     vis_sample = theano.shared(np.asarray(dataset[1000:1010],dtype=theano.config.floatX))
     ( [ nv_probs,
@@ -182,15 +199,16 @@ def test(batch_size = 20, training_epochs = 15, k=1):
 
     run_gibbs = theano.function(
             [],
-            [nv_samples[-1]],
+            [   nv_probs[-1],
+                nv_samples[-1]],
             updates=updates,
             name="run_gibbs"
         )
 
-    run_gibbs()
+    nv_prob, nv_sample = run_gibbs()
 
-    # scipy.misc.imsave('input.png',vis_sample.get_value(borrow=True)[0])
-    # scipy.misc.imsave('output.png',nv_samples.get_value(borrow=True)[-1,0])
+    scipy.misc.imsave('input.png',vis_sample.get_value(borrow=True)[1].reshape(n_row,n_col))
+    scipy.misc.imsave('output.png',nv_prob[0].reshape(n_row,n_col))
 
 if __name__ == '__main__':
-    test(training_epochs=10)
+    test(training_epochs=15)
