@@ -110,7 +110,7 @@ class RBM(object):
         for param, gparam in zip(params, gparams):
             updates[param] = param + gparam * T.cast(eps,dtype=theano.config.floatX)
 
-        dist = T.sum(T.sqr(self.input - vK_prob))
+        dist = T.mean(T.sqr(self.input - vK_prob))
         return dist, updates
 
 def test_rbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200):
@@ -127,7 +127,7 @@ def test_rbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200):
     dist, updates = rbm.CD(k=k)
 
     bin_dataset = np.ones(dataset.shape,dtype=theano.config.floatX)
-    bin_dataset = bin_dataset * (dataset > 0)
+    bin_dataset = bin_dataset * (dataset > 128)
 
     train_set = theano.shared(bin_dataset, borrow=True)
 

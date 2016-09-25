@@ -20,11 +20,6 @@ def load_MNIST():
             image = struct.unpack("B"*img_size, data[16+i*img_size:16+(i+1)*img_size])
             images[i] = list(image)
 
-        # Normalize the images to have zero mean and unit standard
-        # deviation (see https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf 13.2)
-        images = images-np.mean(images,axis=1,keepdims=True)
-        images = images / np.std(images,axis=1,keepdims=True)
-
     # Read the labels
     with open('../data/train-labels-idx1-ubyte') as file:
         data = file.read()
@@ -40,6 +35,13 @@ def load_MNIST():
         n_levels = np.int(np.max(labels)-np.min(labels)+1)
 
     return [n_images, n_row, n_col, images, n_levels, labels]
+
+def normalize(X):
+    # Normalize the images to have zero mean and unit standard
+    # deviation (see https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf 13.2)
+    Y = X - np.mean(X, axis=0, keepdims=True)
+    Y = Y / np.std(X, axis=0, keepdims=True)
+    return np.nan_to_num(Y)
 
 def display_weigths(X, img_row, img_col, n_hidden):
     X=X.T

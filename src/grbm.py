@@ -7,6 +7,7 @@ import scipy.misc
 from utils import load_MNIST
 from utils import display_weigths
 from utils import display_samples
+from utils import normalize
 
 class GRBM(object):
     # Implement a Gaussian-Bernoulli Restricted Boltzmann Machine
@@ -24,10 +25,7 @@ class GRBM(object):
         self.a = theano.shared(np.zeros(self.n_hidden,dtype=theano.config.floatX),
                                borrow=True,
                                name='a')
-        # Rescale terms for visible units
-        self.sigma = theano.shared(np.ones(self.n_input, dtype=theano.config.floatX),
-                                   borrow=True,
-                                   name='sigma')
+
         # Weights
         rng = np.random.RandomState(2468)
         self.W = theano.shared(np.asarray(
@@ -41,14 +39,14 @@ class GRBM(object):
 
     def v_sample(self, h):
         # Derive a sample of visible units from the hidden units h
-        mu = self.b + self.sigma * T.dot(h,self.W.T)
-        return [mu, self.srng.normal(size=mu.shape, avg=mu, std=self.sigma*self.sigma, dtype=theano.config.floatX)]
+        mu = self.b + T.dot(h,self.W.T)
+        return [mu, mu+self.srng.normal(size=mu.shape, avg=0, std=1.0, dtype=theano.config.floatX)]
 
     def h_sample(self, v):
         # Derive a sample of hidden units from the visible units v
-        activation = self.a + T.dot(v/self.sigma,self.W)
-        prob = T.nnet.sigmoid(activation)
-        return [prob, self.srng.binomial(size=activation.shape,n=1,p=prob,dtype=theano.config.floatX)]
+        act = self.a + T.dot(v,self.W)
+        prob = T.nnet.sigmoid(act)
+        return [prob, self.srng.binomial(size=act.shape,n=1,p=prob,dtype=theano.config.floatX)]
 
     def output(self):
         prob, hS = self.h_sample(self.input)
@@ -66,7 +64,7 @@ class GRBM(object):
         nv_prob, nv_sample = self.v_sample(nh_sample)
         return [nv_prob, nv_sample, nh_prob, nh_sample]
 
-    def CD(self, k=1, eps=0.1):
+    def CD(self, k=1, eps=0.01):
         # Contrastive divergence
         # Positive phase
         h0_prob, h0_sample = self.h_sample(self.input)
@@ -102,13 +100,19 @@ class GRBM(object):
         for param, gparam in zip(params, gparams):
             updates[param] = param + gparam * T.cast(eps,dtype=theano.config.floatX)
 
-        dist = T.sum(T.sqr(self.input - vK_prob))
+        dist = T.mean(T.sqr(self.input - vK_prob))
         return dist, updates
 
 def test_grbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200):
 
-    n_data, n_row, n_col, dataset, levels, targets = load_MNIST()
+    n_data, n_row, n_col, r_dataset, levels, targets = load_MNIST()
     n_visible = n_row * n_col
+
+    # See https://www.cs.toronto.edu/~kriz/learning-features-2009-TR.pdf
+    # 13.2: "it is [...] easier to first normalise each component of the data to have zero
+    #        mean and unit variance and then to use noise free reconstructions, with the variance
+    #        in equation 17 set to 1"
+    dataset = normalize(r_dataset)
 
     index = T.lscalar('index')
     x = T.matrix('x')
@@ -159,6 +163,7 @@ def test_grbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200):
                 [   nv_probs[-1],
                     nv_samples[-1]],
                 updates=updates,
+                mode='NanGuardMode',
                 name="run_gibbs"
             )
 
@@ -170,4 +175,4 @@ def test_grbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200):
     scipy.misc.imsave('mix.png',Y)
 
 if __name__ == '__main__':
-    test_grbm(training_epochs=15, k=15)
+    test_grbm(training_epochs=10, k=15)
