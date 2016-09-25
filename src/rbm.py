@@ -153,7 +153,7 @@ def test_rbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200):
         scipy.misc.imsave('filters_at_epoch_%i.png' % epoch,Wimg)
 
     samples = []
-    vis_sample = theano.shared(np.asarray(dataset[1000:1010], dtype=theano.config.floatX))
+    vis_sample = theano.shared(np.asarray(bin_dataset[1000:1010], dtype=theano.config.floatX))
     samples.append(vis_sample.get_value(borrow=True))
 
     for i in xrange(10):
