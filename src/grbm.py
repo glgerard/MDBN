@@ -4,6 +4,9 @@ from theano import tensor as T
 from theano.tensor.shared_randomstreams import RandomStreams
 import struct
 import scipy.misc
+from utils import load_MNIST
+from utils import display_weigths
+from utils import display_samples
 
 class GRBM(object):
     # Implement a Gaussian-Bernoulli Restricted Boltzmann Machine
@@ -54,7 +57,7 @@ class GRBM(object):
     def gibbs_update(self, h):
         # A Gibbs step
         nv_prob, nv_sample = self.v_sample(h)
-        nh_prob, nh_sample = self.h_sample(nv_sample)
+        nh_prob, nh_sample = self.h_sample(nv_prob)
         return [nv_prob, nv_sample, nh_prob, nh_sample]
 
     def alt_gibbs_update(self, v):
@@ -63,7 +66,7 @@ class GRBM(object):
         nv_prob, nv_sample = self.v_sample(nh_sample)
         return [nv_prob, nv_sample, nh_prob, nh_sample]
 
-    def CD(self, k=1, eps=0.05):
+    def CD(self, k=1, eps=0.1):
         # Contrastive divergence
         # Positive phase
         h0_prob, h0_sample = self.h_sample(self.input)
@@ -73,7 +76,10 @@ class GRBM(object):
             nv_samples,
             nh_probs,
             nh_samples],
-          updates) = theano.scan(self.gibbs_update,outputs_info=[None, h0_sample],n_steps=k,name="gibbs_update")
+          updates) = theano.scan(self.gibbs_update,
+                                 outputs_info=[None, None, None, h0_sample],
+                                 n_steps=k,
+                                 name="gibbs_update")
 
         vK_prob = nv_probs[-1]
         vK_sample = nv_samples[-1]
@@ -99,61 +105,7 @@ class GRBM(object):
         dist = T.sum(T.sqr(self.input - vK_prob))
         return dist, updates
 
-def load_MNIST():
-    #  http://yann.lecun.com/exdb/mnist/
-
-    # Read the images
-    with open('../data/train-images-idx3-ubyte', 'rb') as file:
-        data = file.read()
-        header = struct.unpack(">IIII", data[:16])
-        n_images = header[1]
-        print("Reading %i images" % n_images)
-        n_row = header[2]
-        n_col = header[3]
-        print("Images dimension %i x %i" % (n_row, n_col))
-        img_size = n_row * n_col
-        images = np.zeros((n_images,img_size),dtype=theano.config.floatX)
-        for i in xrange(n_images):
-            image = struct.unpack("B"*img_size, data[16+i*img_size:16+(i+1)*img_size])
-            images[i] = list(image)
-
-        # Normalize the images to have zero mean and unit standar
-        # deviation (see https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf 13.2)
-        images = images-np.mean(images,axis=1,keepdims=True)
-        images = images / np.std(images,axis=1,keepdims=True)
-
-    # Read the labels
-    with open('../data/train-labels-idx1-ubyte') as file:
-        data = file.read()
-        header = struct.unpack(">II", data[:8])
-        n_labels = header[1]
-        print("Reading %i labels" % n_images)
-
-        labels = np.zeros((n_labels,1),dtype=theano.config.floatX)
-        for i in xrange(n_labels):
-            label = struct.unpack("B", data[8+i:8+i+1])
-            labels[i] = list(label)
-
-        n_levels = np.int(np.max(labels)-np.min(labels)+1)
-
-    return [n_images, n_row, n_col, images, n_levels, labels]
-
-def create_image(X, img_row, img_col, n_hidden):
-    X=X.T
-    n_tiles = int(np.sqrt(n_hidden))+1
-    img_gap_row = img_row + 1
-    img_gap_col = img_col + 1
-    Y = np.zeros((n_tiles * img_gap_row, n_tiles * img_gap_col), dtype=theano.config.floatX)
-    for r in xrange(n_tiles):
-        for c in xrange(n_tiles):
-            if (r*n_tiles + c) < n_hidden:
-                Y[r*img_gap_row:(r + 1) * img_gap_row - 1, c * img_gap_col:(c + 1) * img_gap_col - 1] =\
-                    X[r * n_tiles + c].reshape(img_row, img_col)
-            else:
-                break
-    return Y
-
-def test(batch_size = 20, training_epochs = 15, k=1, n_hidden=200):
+def test_grbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200):
 
     n_data, n_row, n_col, dataset, levels, targets = load_MNIST()
     n_visible = n_row * n_col
@@ -185,30 +137,37 @@ def test(batch_size = 20, training_epochs = 15, k=1, n_hidden=200):
         print("Training epoch %d, mean batch reconstructed distance %f" % (epoch, np.mean(dist)))
 
         # Construct image from the weight matrix
-        Wimg = create_image(rbm.W.get_value(borrow=True),n_row,n_col,n_hidden)
+        Wimg = display_weigths(rbm.W.get_value(borrow=True), n_row, n_col, n_hidden)
         scipy.misc.imsave('filters_at_epoch_%i.png' % epoch,Wimg)
 
-    vis_sample = theano.shared(np.asarray(dataset[1000:1010],dtype=theano.config.floatX))
-    ( [ nv_probs,
-        nv_samples,
-        nh_probs,
-        nh_samples],
-        updates) = theano.scan(rbm.alt_gibbs_update,outputs_info=[None, vis_sample, None, None],
-                                 n_steps=1000,
-                                 name="alt_gibbs_update")
+    samples = []
+    vis_sample = theano.shared(np.asarray(dataset[1000:1010], dtype=theano.config.floatX))
+    samples.append(vis_sample.get_value(borrow=True))
 
-    run_gibbs = theano.function(
-            [],
-            [   nv_probs[-1],
-                nv_samples[-1]],
-            updates=updates,
-            name="run_gibbs"
-        )
+    for i in xrange(10):
+        ( [ nv_probs,
+            nv_samples,
+            nh_probs,
+            nh_samples],
+            updates) = theano.scan(rbm.alt_gibbs_update,
+                                   outputs_info=[None, vis_sample, None, None],
+                                    n_steps=1000,
+                                    name="alt_gibbs_update")
 
-    nv_prob, nv_sample = run_gibbs()
+        run_gibbs = theano.function(
+                [],
+                [   nv_probs[-1],
+                    nv_samples[-1]],
+                updates=updates,
+                name="run_gibbs"
+            )
 
-    scipy.misc.imsave('input.png',vis_sample.get_value(borrow=True)[1].reshape(n_row,n_col))
-    scipy.misc.imsave('output.png',nv_prob[0].reshape(n_row,n_col))
+        nv_prob, nv_sample = run_gibbs()
+
+        samples.append(nv_prob)
+
+    Y = display_samples(samples, n_row, n_col)
+    scipy.misc.imsave('mix.png',Y)
 
 if __name__ == '__main__':
-    test(training_epochs=15)
+    test_grbm(training_epochs=15, k=15)
