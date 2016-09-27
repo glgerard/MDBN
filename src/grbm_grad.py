@@ -40,9 +40,9 @@ class GRBM(object):
     def v_sample(self, h):
         # Derive a sample of visible units from the hidden units h
         mu = self.a + T.dot(h,self.W.T)
-        return [mu, mu+self.srng.normal(size=mu.shape, avg=0, std=1.0, dtype=theano.config.floatX)]
-#        prob = T.nnet.sigmoid(mu)
-#        return [prob, self.srng.binomial(size=mu.shape, n=1, p=prob, dtype=theano.config.floatX)]
+#        v_sample = mu + self.srng.normal(size=mu.shape, avg=0, std=1.0, dtype=theano.config.floatX)
+        v_sample = mu # error-free reconstruction
+        return [mu, v_sample]
 
     def h_sample(self, v):
         # Derive a sample of hidden units from the visible units v
@@ -57,7 +57,7 @@ class GRBM(object):
     def gibbs_update(self, h):
         # A Gibbs step
         nv_prob, nv_sample = self.v_sample(h)
-        nh_prob, nh_sample = self.h_sample(nv_prob)
+        nh_prob, nh_sample = self.h_sample(nv_sample)
         return [nv_prob, nv_sample, nh_prob, nh_sample]
 
     def alt_gibbs_update(self, v):
@@ -69,7 +69,7 @@ class GRBM(object):
     def free_energy(self, v_sample):
         wx_b = T.dot(v_sample, self.W) + self.b
         vbias_term = 0.5 * T.dot((v_sample - self.a), (v_sample - self.a).T)
-        hidden_term = T.sum(T.log(1 + T.exp(wx_b)), axis=1)
+        hidden_term = T.sum(T.nnet.softplus(wx_b), axis=1)
         return -hidden_term - vbias_term
 
     def CD(self, k=1, eps=0.01):
@@ -174,4 +174,4 @@ def test_grbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200):
     scipy.misc.imsave('mix.png',Y)
 
 if __name__ == '__main__':
-    test_grbm(training_epochs=10, k=15)
+    test_grbm(training_epochs=5, k=5)
