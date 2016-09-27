@@ -18,11 +18,11 @@ class GRBM(object):
         self.n_hidden = n_hidden
 
         # Rescale terms for visible units
-        self.b = theano.shared(value=np.zeros(self.n_input, dtype=theano.config.floatX),
+        self.a = theano.shared(value=np.zeros(self.n_input, dtype=theano.config.floatX),
                                borrow=True,
                                name='b')
         # Bias terms for hidden units
-        self.a = theano.shared(np.zeros(self.n_hidden,dtype=theano.config.floatX),
+        self.b = theano.shared(np.zeros(self.n_hidden,dtype=theano.config.floatX),
                                borrow=True,
                                name='a')
 
@@ -39,12 +39,14 @@ class GRBM(object):
 
     def v_sample(self, h):
         # Derive a sample of visible units from the hidden units h
-        mu = self.b + T.dot(h,self.W.T)
-        return [mu, mu+self.srng.normal(size=mu.shape, avg=0, std=1.0, dtype=theano.config.floatX)]
+        mu = self.a + T.dot(h, self.W.T)
+#        v_sample = mu + self.srng.normal(size=mu.shape, avg=0, std=1.0, dtype=theano.config.floatX)
+        v_sample = mu  # error-free reconstruction
+        return [mu, v_sample]
 
     def h_sample(self, v):
         # Derive a sample of hidden units from the visible units v
-        act = self.a + T.dot(v,self.W)
+        act = self.b + T.dot(v,self.W)
         prob = T.nnet.sigmoid(act)
         return [prob, self.srng.binomial(size=act.shape,n=1,p=prob,dtype=theano.config.floatX)]
 
@@ -55,7 +57,7 @@ class GRBM(object):
     def gibbs_update(self, h):
         # A Gibbs step
         nv_prob, nv_sample = self.v_sample(h)
-        nh_prob, nh_sample = self.h_sample(nv_prob)
+        nh_prob, nh_sample = self.h_sample(nv_sample)
         return [nv_prob, nv_sample, nh_prob, nh_sample]
 
     def alt_gibbs_update(self, v):
@@ -90,9 +92,9 @@ class GRBM(object):
         w_grad = (T.dot(self.input.T, h0_prob) - T.dot(vK_prob.T, hK_prob))/\
                  T.cast(self.input.shape[0],dtype=theano.config.floatX)
 
-        b_grad = T.mean(self.input - vK_prob, axis=0)
+        a_grad = T.mean(self.input - vK_prob, axis=0)
 
-        a_grad = T.mean(h0_prob - hK_prob, axis=0)
+        b_grad = T.mean(h0_prob - hK_prob, axis=0)
 
         params = [self.a, self.b, self.W]
         gparams = [a_grad, b_grad, w_grad]
@@ -175,4 +177,4 @@ def test_grbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200):
     scipy.misc.imsave('mix.png',Y)
 
 if __name__ == '__main__':
-    test_grbm(training_epochs=10, k=15)
+    test_grbm(training_epochs=10, k=10)
