@@ -135,8 +135,6 @@ def test_rbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200, binary=Tr
 
     init_chain = theano.shared(np.zeros((batch_size,n_hidden),dtype=theano.config.floatX))
 
-    n_dataset = normalize(r_dataset)
-
     if binary == True:
         rbm = RBM(x, n_visible, n_hidden)
         dataset = np.ones(r_dataset.shape,dtype=theano.config.floatX)
