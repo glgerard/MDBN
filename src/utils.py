@@ -37,11 +37,12 @@ def load_MNIST():
     return [n_images, n_row, n_col, images, n_levels, labels]
 
 def normalize(X):
-    # Normalize the images to have zero mean and unit standard
+    # Normalize the images features to have zero mean and approximately unit standard
     # deviation (see https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf 13.2)
-    Y = X - np.mean(X, axis=0, keepdims=True)
-    Y = Y / np.std(X, axis=0, keepdims=True)
-    return np.nan_to_num(Y)
+    X = (X - 128.0) / 128.0
+    # take the global standard deviation as a normalization constant for all features
+    gs = np.std(X)
+    return X / gs
 
 def display_weigths(X, img_row, img_col, n_hidden):
     X=X.T

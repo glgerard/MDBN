@@ -2,7 +2,6 @@ import numpy as np
 import theano
 from theano import tensor as T
 from theano.tensor.shared_randomstreams import RandomStreams
-import struct
 import scipy.misc
 from utils import load_MNIST
 from utils import display_weigths
@@ -57,7 +56,7 @@ class GRBM(object):
     def gibbs_update(self, h):
         # A Gibbs step
         nv_prob, nv_sample = self.v_sample(h)
-        nh_prob, nh_sample = self.h_sample(nv_sample)
+        nh_prob, nh_sample = self.h_sample(nv_prob)
         return [nv_prob, nv_sample, nh_prob, nh_sample]
 
     def alt_gibbs_update(self, v):
@@ -174,4 +173,4 @@ def test_grbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200):
     scipy.misc.imsave('mix.png',Y)
 
 if __name__ == '__main__':
-    test_grbm(training_epochs=5, k=5)
+    test_grbm(training_epochs=15, k=1)

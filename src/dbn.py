@@ -2,8 +2,8 @@ import numpy as np
 import theano
 from theano import tensor as T
 from theano.tensor.shared_randomstreams import RandomStreams
-from grbm import GRBM
 from rbm import RBM
+from rbm import GRBM
 from utils import load_MNIST
 
 class DBN(object):
