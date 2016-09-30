@@ -1,6 +1,6 @@
 import numpy as np
 import theano
-from theano import tensor as T
+from theano import pp, tensor as T
 import scipy.misc
 from rbm import RBM
 from rbm import GRBM
@@ -22,11 +22,13 @@ class DBN(object):
         self.rbm_layers.append(GRBM(self.input, self.n_input, self.hidden_layers_sizes[0]))
 
         for (l, size) in enumerate(self.hidden_layers_sizes[:-1]):
-            self.rbm_layers.append(RBM(self.rbm_layers[-1].output(),
+            input = self.rbm_layers[-1].output()
+            self.rbm_layers.append(RBM(input,
                                        size,
                                        self.hidden_layers_sizes[l+1]))
 
-        self.rbm_layers.append(RBM(self.rbm_layers[-1].output(),
+        input = self.rbm_layers[-1].output()
+        self.rbm_layers.append(RBM(input,
                                    self.hidden_layers_sizes[-1],
                                    self.n_output))
 
@@ -37,7 +39,7 @@ class DBN(object):
         fns = []
         for rbm in self.rbm_layers:
             # using CD-k for training each RBM.
-            dist, updates = rbm.CD(k)
+            dist, updates = rbm.CD(k=k)
 
             # compile the theano function
             fn = theano.function(
@@ -66,51 +68,26 @@ def test_dbn(batch_size=20, training_epochs=15, k=1):
 
     # construct the Deep Belief Network
     dbn = DBN(n_input=n_visible,
-              hidden_layers_sizes=[200, 50],
-              n_output=levels)
+              hidden_layers_sizes=[196, 64],
+              n_output=16)
 
     training_fns = dbn.training_functions(training_set=train_set,
                                           batch_size=batch_size,
                                           k=k)
 
-    for i in xrange(len(dbn.rbm_layers)):
+    for layer in xrange(len(dbn.rbm_layers)):
         # go through training epochs
         for epoch in xrange(training_epochs):
             # go through the training set
             c = []
             for n_batch in xrange(n_data // batch_size):
-                c.append(training_fns[i](index=n_batch))
+                c.append(training_fns[layer](index=n_batch))
             print("Training epoch %d, mean batch reconstructed distance %f" % (epoch, np.mean(c)))
-
-    samples = []
-    vis_sample = theano.shared(np.asarray(dataset[1000:1010], dtype=theano.config.floatX))
-    samples.append(vis_sample.get_value(borrow=True))
-
-    for i in xrange(10):
-        ( [
-            nv_probs,
-            nv_samples,
-            nh_probs,
-            nh_samples],
-            updates) = theano.scan(rbm.gibbs_step_vhv,
-                                   outputs_info=[None, vis_sample, None, None],
-                                   n_steps=1000,
-                                   name="alt_gibbs_update")
-
-        run_gibbs = theano.function(
-                [],
-                [   nv_probs[-1],
-                    nv_samples[-1]],
-                updates=updates,
-                name="run_gibbs"
-            )
-
-        nv_prob, nv_sample = run_gibbs()
-
-        samples.append(nv_prob)
-
-    Y = display_samples(samples, n_row, n_col)
-    scipy.misc.imsave('mix.png',Y)
+        # Construct image from the weight matrix
+        n_row = int(np.round(np.sqrt(dbn.rbm_layers[layer].n_input)))
+        n_output = dbn.rbm_layers[layer].n_output
+        Wimg = display_weigths(dbn.rbm_layers[layer].W.get_value(borrow=True), n_row, n_row, n_output)
+        scipy.misc.imsave('final_filter_at_layer_%i.png' % layer, Wimg)
 
 if __name__ == '__main__':
-    test_dbn(training_epochs=15,k=1)
+    test_dbn(training_epochs=10,k=1)

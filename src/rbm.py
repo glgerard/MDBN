@@ -13,8 +13,8 @@ class RBM(object):
 
     def __init__(self, input, n_input, n_hidden):
         self.input = input
-        self.n_visible = n_input
-        self.n_input = n_hidden
+        self.n_input = n_input
+        self.n_output = n_hidden
 
         # Rescale terms for visible units
         self.a = theano.shared(value=np.zeros(n_input, dtype=theano.config.floatX),
@@ -108,6 +108,11 @@ class RBM(object):
 
         for param, gparam in zip(params, gparams):
             updates[param] = param + gparam * T.cast(eps,dtype=theano.config.floatX)
+
+#        for update in updates:
+#            print(update)
+#            print(updates[update])
+
 
         dist = T.mean(T.sqr(self.input - vK_sample))
         return dist, updates
