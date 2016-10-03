@@ -1,23 +1,22 @@
 import numpy as np
 import theano
-from theano import tensor as T
-from theano.tensor.shared_randomstreams import RandomStreams
+from theano import tensor
+#from theano.tensor.shared_randomstreams import RandomStreams
+from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 import scipy.misc
-from utils import load_MNIST
-from utils import display_weigths
-from utils import display_samples
-from utils import normalize
+from MNIST import MNIST
+from utils import zscore
 
 class RBM(object):
     # Implement a Bernoulli Restricted Boltzmann Machine
 
-    def __init__(self, input, n_input, n_hidden):
+    def __init__(self, input, n_visible, n_hidden):
+        self.n_visible = n_visible
+        self.n_hidden = n_hidden
         self.input = input
-        self.n_input = n_input
-        self.n_output = n_hidden
 
         # Rescale terms for visible units
-        self.a = theano.shared(value=np.zeros(n_input, dtype=theano.config.floatX),
+        self.a = theano.shared(value=np.zeros(n_visible, dtype=theano.config.floatX),
                                borrow=True,
                                name='a')
         # Bias terms for hidden units
@@ -29,23 +28,24 @@ class RBM(object):
         rng = np.random.RandomState(2468)
         self.W = theano.shared(np.asarray(
                     rng.uniform(
-                            -4 * np.sqrt(6. / (n_hidden + n_input)),
-                            4 * np.sqrt(6. / (n_hidden + n_input)),
-                            (n_input, n_hidden)
+                            -4 * np.sqrt(6. / (n_hidden + n_visible)),
+                            4 * np.sqrt(6. / (n_hidden + n_visible)),
+                            (n_visible, n_hidden)
                         ),dtype=theano.config.floatX),
+                    borrow=True,
                     name='W')
         self.srng = RandomStreams(rng.randint(2 ** 30))
 
     def v_sample(self, h):
         # Derive a sample of visible units from the hidden units h
-        act = self.a + T.dot(h,self.W.T)
-        prob = T.nnet.sigmoid(act)
+        act = self.a + tensor.tensordot(h,self.W,axes=[1,1])
+        prob = tensor.nnet.sigmoid(act)
         return [prob, self.srng.binomial(size=act.shape,n=1,p=prob,dtype=theano.config.floatX)]
 
     def h_sample(self, v):
         # Derive a sample of hidden units from the visible units v
-        act = self.b + T.dot(v,self.W)
-        prob = T.nnet.sigmoid(act)
+        act = self.b + tensor.dot(v,self.W)
+        prob = tensor.nnet.sigmoid(act)
         return [prob, self.srng.binomial(size=act.shape,n=1,p=prob,dtype=theano.config.floatX)]
 
     def output(self):
@@ -58,13 +58,20 @@ class RBM(object):
         nh_prob, nh_sample = self.h_sample(nv_sample)
         return [nv_prob, nv_sample, nh_prob, nh_sample]
 
+    def gibbs_step_hvhp(self, hp):
+        # A Gibbs step
+        nv_prob, nv_sample = self.v_sample(hp)
+        nh_prob, nh_sample = self.h_sample(nv_prob)
+        return [nv_prob, nv_sample, nh_prob, nh_sample]
+
     def gibbs_step_vhv(self, v):
         # A Gibbs step
         nh_prob, nh_sample = self.h_sample(v)
         nv_prob, nv_sample = self.v_sample(nh_sample)
         return [nv_prob, nv_sample, nh_prob, nh_sample]
 
-    def CD(self, persistent=None, k=1, eps=0.01):
+    def contrastive_divergence(self, k=1, lr=0.01, lambda1=0, lambda2=0,
+                               persistent=None, stocastic_steps=True):
         # Contrastive divergence
         # Positive phase
         h0_prob, h0_sample = self.h_sample(self.input)
@@ -75,15 +82,26 @@ class RBM(object):
             h_sample = persistent
 
         # Negative phase
-        ( [
-            nv_probs,
-            nv_samples,
-            nh_probs,
-            nh_samples],
-          updates) = theano.scan(self.gibbs_step_hvh,
-                                 outputs_info=[None, None, None, h_sample],
-                                 n_steps=k,
-                                 name="gibbs_update")
+        if stocastic_steps:
+            ( [
+                nv_probs,
+                nv_samples,
+                nh_probs,
+                nh_samples],
+              updates) = theano.scan(self.gibbs_step_hvh,
+                                     outputs_info=[None, None, None, h_sample],
+                                     n_steps=k,
+                                     name="gibbs_update")
+        else:
+            ([
+                 nv_probs,
+                 nv_samples,
+                 nh_probs,
+                 nh_samples],
+             updates) = theano.scan(self.gibbs_step_hvhp,
+                                    outputs_info=[None, None, h0_prob, None],
+                                    n_steps=k,
+                                    name="gibbs_update")
 
         vK_prob = nv_probs[-1]
         vK_sample = nv_samples[-1]
@@ -96,87 +114,110 @@ class RBM(object):
         # See https://www.cs.toronto.edu/~kriz/learning-features-2009-TR.pdf
         # I keep sigma unit as reported in https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf 13.2
 
-        w_grad = (T.dot(self.input.T, h0_prob) - T.dot(vK_prob.T, hK_prob))/\
-                 T.cast(self.input.shape[0],dtype=theano.config.floatX)
+        W_grad = (tensor.dot(self.input.T, h0_prob) - tensor.dot(vK_prob.T, hK_prob))/\
+                 tensor.cast(self.input.shape[0],dtype=theano.config.floatX)
 
-        a_grad = T.mean(self.input - vK_prob, axis=0)
+        a_grad = tensor.mean(self.input - vK_prob, axis=0)
 
-        b_grad = T.mean(h0_prob - hK_prob, axis=0)
+        b_grad = tensor.mean(h0_prob - hK_prob, axis=0)
 
-        params = [self.a, self.b, self.W]
-        gparams = [a_grad, b_grad, w_grad]
+        params = [self.a, self.b]
+        gparams = [a_grad, b_grad]
+        eps = tensor.cast(lr, dtype=theano.config.floatX)
 
         for param, gparam in zip(params, gparams):
-            updates[param] = param + gparam * T.cast(eps,dtype=theano.config.floatX)
+            updates[param] = param + gparam * eps
+        if lambda1+lambda2 == 0:
+            updates[self.W] = self.W + W_grad * eps
+        else:
+            # Used in M. Liang et al. 2015
+            l1 = tensor.cast(1-2*lambda1*lr, dtype=theano.config.floatX)
+            l2 = tensor.cast(2*lambda2*lr, dtype=theano.config.floatX)
+            updates[self.W] = (l1 * self.W + W_grad * eps ) /\
+                              (1 + l2/tensor.abs_(self.W))
 
-#        for update in updates:
-#            print(update)
-#            print(updates[update])
+        if stocastic_steps:
+            sme = tensor.mean(tensor.sum((self.input - vK_sample)**2,axis=1))
+        else:
+            sme = tensor.mean(tensor.sum((self.input - vK_prob)**2,axis=1))
 
+        return sme, updates
 
-        dist = T.mean(T.sqr(self.input - vK_sample))
-        return dist, updates
+    def training(self, dataset, batch_size, training_epochs, k, lr,
+                 lambda1=0, lambda2=0,
+                 stocastic_steps=True,
+                 display_fn=None):
+        index = tensor.lscalar('index')
+        train_set = theano.shared(dataset, borrow=True)
+
+        sme, updates = self.contrastive_divergence(k=k, lr=lr,
+                                                   lambda1=lambda1,
+                                                   lambda2=lambda2,
+                                                   stocastic_steps=stocastic_steps)
+
+        train = theano.function(
+            [index],
+            sme,
+            updates=updates,
+            givens={
+                self.input: train_set[index * batch_size: (index + 1) * batch_size]
+            },
+            name="train"
+        )
+
+        n_data = dataset.shape[0]
+        for epoch in xrange(training_epochs):
+            sme_list = []
+            for n_batch in xrange(n_data // batch_size):
+                sme_list.append(train(n_batch))
+
+            print("Training epoch %d, reconstruction error %f" % (epoch, sme_list[-1]))
+
+            if display_fn is not None:
+                # Construct image from the weight matrix
+                Wimg = display_fn(self.W.get_value(borrow=True), self.n_hidden)
+                scipy.misc.imsave('filters_at_epoch_%i.png' % epoch, Wimg)
 
 class GRBM(RBM):
     # Implement a Gaussian-Bernoulli Restricted Boltzmann Machine
-    def __init__(self,input, n_input, n_hidden):
-        super(GRBM, self).__init__(input, n_input, n_hidden)
+    def __init__(self, input, n_visible, n_hidden):
+        super(GRBM, self).__init__(input, n_visible, n_hidden)
 
     def v_sample(self, h):
     # Derive a sample of visible units from the hidden units h
-        mu = self.a + T.dot(h, self.W.T)
+        mu = self.a + tensor.tensordot(h, self.W, axes=[1,1])
 #       v_sample = mu + self.srng.normal(size=mu.shape, avg=0, std=1.0, dtype=theano.config.floatX)
         v_sample = mu  # error-free reconstruction
         return [mu, v_sample]
 
 def test_rbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200, binary=True):
+    # Load the data
+    mnist = MNIST('../data/train-images-idx3-ubyte')
+    raw_dataset = mnist.images
+    n_visible = mnist.sizeX * mnist.sizeY
 
-    n_data, n_row, n_col, r_dataset, levels, targets = load_MNIST()
-    n_visible = n_row * n_col
-
-    index = T.lscalar('index')
-    x = T.matrix('x')
     print("Building an RBM with %i visible inputs and %i hidden units" % (n_visible, n_hidden))
 
-    init_chain = theano.shared(np.zeros((batch_size,n_hidden),dtype=theano.config.floatX))
+#    init_chain = theano.shared(np.zeros((batch_size,n_hidden),dtype=theano.config.floatX))
+
+    # Build the RBM
+    x = tensor.matrix('x')
 
     if binary == True:
         rbm = RBM(x, n_visible, n_hidden)
-        dataset = np.ones(r_dataset.shape,dtype=theano.config.floatX)
-        r_dataset = r_dataset-np.mean(r_dataset,axis=1,keepdims=True)
-        r_dataset = r_dataset / np.std(r_dataset,axis=1,keepdims=True)
-        dataset = dataset * (r_dataset > 0)
+        dataset = np.ones(raw_dataset.shape,dtype=theano.config.floatX)
+        zscore(raw_dataset)
+        dataset = dataset * (raw_dataset > 0)
         lr = 0.01
     else:
         rbm = GRBM(x, n_visible, n_hidden)
-        dataset = normalize(r_dataset)
+        dataset = mnist.normalize(raw_dataset)
         lr = 0.01
 
-    dist, updates = rbm.CD(k=k, eps=lr)
+    # Train the RBM
+    rbm.training(dataset, batch_size, training_epochs, k, lr, mnist.display_weigths)
 
-    train_set = theano.shared(dataset, borrow=True)
-
-    train = theano.function(
-        [index],
-        dist,
-        updates=updates,
-        givens={
-            x: train_set[index*batch_size : (index+1)*batch_size]
-        },
-        name="train"
-    )
-
-    for epoch in xrange(training_epochs):
-        dist = []
-        for n_batch in xrange(n_data//batch_size):
-            dist.append(train(n_batch))
-
-        print("Training epoch %d, mean batch reconstructed distance %f" % (epoch, np.mean(dist)))
-
-        # Construct image from the weight matrix
-        Wimg = display_weigths(rbm.W.get_value(borrow=True), n_row, n_col, n_hidden)
-        scipy.misc.imsave('filters_at_epoch_%i.png' % epoch,Wimg)
-
+    # Test the model we have learned
     samples = []
     vis_sample = theano.shared(np.asarray(dataset[1000:1010], dtype=theano.config.floatX))
     samples.append(vis_sample.get_value(borrow=True))
@@ -204,7 +245,7 @@ def test_rbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200, binary=Tr
 
         samples.append(nv_prob)
 
-    Y = display_samples(samples, n_row, n_col)
+    Y = mnist.display_samples(samples)
     scipy.misc.imsave('mix.png',Y)
 
 if __name__ == '__main__':
