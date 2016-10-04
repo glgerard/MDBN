@@ -34,11 +34,12 @@ class RBM(object):
                         ),dtype=theano.config.floatX),
                     borrow=True,
                     name='W')
+        self.Wt = self.W.T
         self.srng = RandomStreams(rng.randint(2 ** 30))
 
     def v_sample(self, h):
         # Derive a sample of visible units from the hidden units h
-        act = self.a + tensor.tensordot(h,self.W,axes=[1,1])
+        act = self.a + tensor.tensordot(h,self.Wt,axes=[1,0])
         prob = tensor.nnet.sigmoid(act)
         return [prob, self.srng.binomial(size=act.shape,n=1,p=prob,dtype=theano.config.floatX)]
 
@@ -80,6 +81,8 @@ class RBM(object):
             h_sample = h0_sample
         else:
             h_sample = persistent
+
+        self.Wt = self.W.T
 
         # Negative phase
         if stocastic_steps:
@@ -185,7 +188,7 @@ class GRBM(RBM):
 
     def v_sample(self, h):
     # Derive a sample of visible units from the hidden units h
-        mu = self.a + tensor.tensordot(h, self.W, axes=[1,1])
+        mu = self.a + tensor.tensordot(h, self.Wt, axes=[1,0])
 #       v_sample = mu + self.srng.normal(size=mu.shape, avg=0, std=1.0, dtype=theano.config.floatX)
         v_sample = mu  # error-free reconstruction
         return [mu, v_sample]
@@ -222,6 +225,7 @@ def test_rbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200, binary=Tr
     vis_sample = theano.shared(np.asarray(dataset[1000:1010], dtype=theano.config.floatX))
     samples.append(vis_sample.get_value(borrow=True))
 
+    rbm.Wt = rbm.W.T
     for i in xrange(10):
         ( [
             nv_probs,
