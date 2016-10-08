@@ -1,3 +1,4 @@
+import timeit
 import numpy as np
 import theano
 from theano import tensor
@@ -26,20 +27,23 @@ class RBM(object):
 
         # Weights
         rng = np.random.RandomState(2468)
-        self.W = theano.shared(np.asarray(
+#        Warray = np.asarray(rng.uniform(-0.1, 0.1, (n_visible, n_hidden)),
+#                                            dtype=theano.config.floatX)
+        Warray = np.asarray(
                     rng.uniform(
                             -4 * np.sqrt(6. / (n_hidden + n_visible)),
                             4 * np.sqrt(6. / (n_hidden + n_visible)),
                             (n_visible, n_hidden)
-                        ),dtype=theano.config.floatX),
-                    borrow=True,
-                    name='W')
-        self.Wt = self.W.T
+                        ),dtype=theano.config.floatX)
+        self.W = theano.shared(Warray, borrow=True, name='W')
+#        self.Wt = self.W.T
+        self.Wt = theano.shared(np.transpose(Warray), borrow=True, name='Wt')
+
         self.srng = RandomStreams(rng.randint(2 ** 30))
 
     def v_sample(self, h):
         # Derive a sample of visible units from the hidden units h
-        act = self.a + tensor.tensordot(h,self.Wt,axes=[1,0])
+        act = self.a + tensor.dot(h,self.Wt)
         prob = tensor.nnet.sigmoid(act)
         return [prob, self.srng.binomial(size=act.shape,n=1,p=prob,dtype=theano.config.floatX)]
 
@@ -71,7 +75,7 @@ class RBM(object):
         nv_prob, nv_sample = self.v_sample(nh_sample)
         return [nv_prob, nv_sample, nh_prob, nh_sample]
 
-    def contrastive_divergence(self, k=1, lr=0.01, lambda1=0, lambda2=0,
+    def contrastive_divergence(self, k=1, lr=0.01, lam1=0.0, lam2=0.0,
                                persistent=None, stocastic_steps=True):
         # Contrastive divergence
         # Positive phase
@@ -82,7 +86,7 @@ class RBM(object):
         else:
             h_sample = persistent
 
-        self.Wt = self.W.T
+#        self.Wt = self.W.T
 
         # Negative phase
         if stocastic_steps:
@@ -117,27 +121,36 @@ class RBM(object):
         # See https://www.cs.toronto.edu/~kriz/learning-features-2009-TR.pdf
         # I keep sigma unit as reported in https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf 13.2
 
-        W_grad = (tensor.dot(self.input.T, h0_prob) - tensor.dot(vK_prob.T, hK_prob))/\
-                 tensor.cast(self.input.shape[0],dtype=theano.config.floatX)
+        eps = tensor.cast(lr, dtype=theano.config.floatX)
 
-        a_grad = tensor.mean(self.input - vK_prob, axis=0)
+        eps0 = eps / tensor.cast(self.input.shape[0],dtype=theano.config.floatX)
 
-        b_grad = tensor.mean(h0_prob - hK_prob, axis=0)
+        W_grad = eps0*(tensor.dot(self.input.T, h0_prob) - tensor.dot(vK_prob.T, hK_prob))
+
+        W_gradT = W_grad.T
+
+        a_grad = eps*tensor.mean(self.input - vK_prob, axis=0)
+
+        b_grad = eps*tensor.mean(h0_prob - hK_prob, axis=0)
 
         params = [self.a, self.b]
         gparams = [a_grad, b_grad]
-        eps = tensor.cast(lr, dtype=theano.config.floatX)
 
         for param, gparam in zip(params, gparams):
-            updates[param] = param + gparam * eps
-        if lambda1+lambda2 == 0:
-            updates[self.W] = self.W + W_grad * eps
+            updates[param] = param + gparam
+
+        if (lam1+lam2) == 0:
+            updates[self.W] = self.W + W_grad
+            updates[self.Wt] = self.Wt + W_gradT
         else:
             # Used in M. Liang et al. 2015
-            l1 = tensor.cast(1-2*lambda1*lr, dtype=theano.config.floatX)
-            l2 = tensor.cast(2*lambda2*lr, dtype=theano.config.floatX)
-            updates[self.W] = (l1 * self.W + W_grad * eps ) /\
-                              (1 + l2/tensor.abs_(self.W))
+            l1 = tensor.cast(2 * lam1 * lr, dtype=theano.config.floatX)
+            l2 = tensor.cast(1 - 2 * lam2 * lr, dtype=theano.config.floatX)
+
+            updates[self.W] = (l2 * self.W + W_grad ) /\
+                              (1 + l1/tensor.abs_(self.W))
+            updates[self.Wt] = (l2 * self.Wt + W_gradT ) /\
+                              (1 + l1/tensor.abs_(self.Wt))
 
         if stocastic_steps:
             sme = tensor.mean(tensor.sum((self.input - vK_sample)**2,axis=1))
@@ -147,34 +160,52 @@ class RBM(object):
         return sme, updates
 
     def training(self, dataset, batch_size, training_epochs, k, lr,
-                 lambda1=0, lambda2=0,
+                 lam1=0, lam2=0,
                  stocastic_steps=True,
+                 data_shuffle=False,
                  display_fn=None):
         index = tensor.lscalar('index')
         train_set = theano.shared(dataset, borrow=True)
 
         sme, updates = self.contrastive_divergence(k=k, lr=lr,
-                                                   lambda1=lambda1,
-                                                   lambda2=lambda2,
+                                                   lam1=lam1,
+                                                   lam2=lam2,
                                                    stocastic_steps=stocastic_steps)
 
-        train = theano.function(
-            [index],
-            sme,
-            updates=updates,
-            givens={
-                self.input: train_set[index * batch_size: (index + 1) * batch_size]
-            },
-            name="train"
-        )
-
         n_data = dataset.shape[0]
-        for epoch in xrange(training_epochs):
-            sme_list = []
-            for n_batch in xrange(n_data // batch_size):
-                sme_list.append(train(n_batch))
 
-            print("Training epoch %d, reconstruction error %f" % (epoch, sme_list[-1]))
+        if not data_shuffle:
+            train = theano.function(
+                [index],
+                sme,
+                updates=updates,
+                givens={
+                    self.input: train_set[index * batch_size: (index + 1) * batch_size]
+                },
+                name="train"
+            )
+        else:
+            indexes = tensor.floor(
+                        self.srng.uniform((1,batch_size),low=0,high=n_data))
+            train = theano.function(
+                [],
+                sme,
+                updates=updates,
+                givens={
+                    self.input: train_set[tensor.cast(indexes,dtype='int64')[0]]
+                },
+                name="train"
+            )
+
+        for epoch in range(training_epochs):
+            sme_list = []
+            if not data_shuffle:
+                for n_batch in xrange(n_data // batch_size):
+                    sme_list.append(train(n_batch))
+            else:
+                sme_list.append(train())
+
+            print("Training epoch %d, reconstruction error %f" % (epoch, np.mean(sme_list)))
 
             if display_fn is not None:
                 # Construct image from the weight matrix
@@ -188,8 +219,8 @@ class GRBM(RBM):
 
     def v_sample(self, h):
     # Derive a sample of visible units from the hidden units h
-        mu = self.a + tensor.tensordot(h, self.Wt, axes=[1,0])
-#       v_sample = mu + self.srng.normal(size=mu.shape, avg=0, std=1.0, dtype=theano.config.floatX)
+        mu = self.a + tensor.dot(h, self.Wt)
+    #       v_sample = mu + self.srng.normal(size=mu.shape, avg=0, std=1.0, dtype=theano.config.floatX)
         v_sample = mu  # error-free reconstruction
         return [mu, v_sample]
 
@@ -218,7 +249,15 @@ def test_rbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200, binary=Tr
         lr = 0.01
 
     # Train the RBM
-    rbm.training(dataset, batch_size, training_epochs, k, lr, mnist.display_weigths)
+    start_time = timeit.default_timer()
+
+    rbm.training(dataset, batch_size, training_epochs, k, lr,
+                 display_fn=mnist.display_weigths)
+
+    end_time = timeit.default_timer()
+
+    training_time = (end_time - start_time)
+    print ('Training took %f minutes' % (training_time / 60.))
 
     # Test the model we have learned
     samples = []

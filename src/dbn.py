@@ -1,40 +1,41 @@
 import numpy as np
 import theano
-from theano import pp, tensor as T
+from theano import pp, tensor
 import scipy.misc
 from rbm import RBM
 from rbm import GRBM
 from utils import load_MNIST
 from utils import display_weigths
 from utils import display_samples
-from utils import normalize
+from utils import normalize_img
 
 class DBN(object):
     def __init__(self, n_input, hidden_layers_sizes, n_output):
         self.n_input = n_input
         self.hidden_layers_sizes = hidden_layers_sizes
         self.n_output = n_output
-
-        self.input = T.matrix('x')
+        self.x = tensor.matrix('x')
 
         self.rbm_layers = []
 
-        self.rbm_layers.append(GRBM(self.input, self.n_input, self.hidden_layers_sizes[0]))
+        self.rbm_layers.append(GRBM(self.x, n_input,self.hidden_layers_sizes[0]))
 
         for (l, size) in enumerate(self.hidden_layers_sizes[:-1]):
             input = self.rbm_layers[-1].output()
-            self.rbm_layers.append(RBM(input,
-                                       size,
-                                       self.hidden_layers_sizes[l+1]))
+            self.rbm_layers.append(RBM(
+                input,
+                size,
+                self.hidden_layers_sizes[l+1]))
 
         input = self.rbm_layers[-1].output()
-        self.rbm_layers.append(RBM(input,
-                                   self.hidden_layers_sizes[-1],
-                                   self.n_output))
+        self.rbm_layers.append(RBM(
+                input,
+                self.hidden_layers_sizes[-1],
+                self.n_output))
 
     def training_functions(self, training_set, batch_size, k):
         # index to a mini-batch
-        index = T.lscalar('index')
+        index = tensor.lscalar('index')
 
         fns = []
         for rbm in self.rbm_layers:
@@ -47,7 +48,7 @@ class DBN(object):
                 dist,
                 updates=updates,
                 givens={
-                    self.input: training_set[index * batch_size:(index + 1)* batch_size]
+                    self.x: training_set[index * batch_size:(index + 1)* batch_size]
                 }
             )
             # append `fn` to the list of functions
@@ -63,7 +64,7 @@ def test_dbn(batch_size=20, training_epochs=15, k=1):
     print("Building a DBN with %i visible inputs and %i output units" % (n_visible, levels))
     print("This DBN has 2 hidden layers of size 200 and 50 each")
 
-    dataset = normalize(r_dataset)
+    dataset = normalize_img(r_dataset)
     train_set = theano.shared(dataset, borrow=True)
 
     # construct the Deep Belief Network
@@ -84,10 +85,15 @@ def test_dbn(batch_size=20, training_epochs=15, k=1):
                 c.append(training_fns[layer](index=n_batch))
             print("Training epoch %d, mean batch reconstructed distance %f" % (epoch, np.mean(c)))
         # Construct image from the weight matrix
-        n_row = int(np.round(np.sqrt(dbn.rbm_layers[layer].n_input)))
-        n_output = dbn.rbm_layers[layer].n_output
-        Wimg = display_weigths(dbn.rbm_layers[layer].W.get_value(borrow=True), n_row, n_row, n_output)
+        current_layer = dbn.rbm_layers[layer];
+        n_row = int(np.round(np.sqrt(current_layer.n_input)))
+        n_output = current_layer.n_output
+        Wimg = display_weigths(current_layer.W.get_value(borrow=True), n_row, n_row, n_output)
         scipy.misc.imsave('final_filter_at_layer_%i.png' % layer, Wimg)
+        np.savez('parameters_at_layer_%i.npz' % layer, state=(layer),
+                                                       W=current_layer.W.get_value(borrow=True),
+                                                       a=current_layer.b.get_value(borrow=True),
+                                                       b=current_layer.a.get_value(borrow=True))
 
 if __name__ == '__main__':
     test_dbn(training_epochs=10,k=1)
