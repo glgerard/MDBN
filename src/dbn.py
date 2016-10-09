@@ -40,7 +40,7 @@ class DBN(object):
         fns = []
         for rbm in self.rbm_layers:
             # using CD-k for training each RBM.
-            dist, updates = rbm.CD(k=k)
+            dist, updates = rbm.get_cost_updates(k=k)
 
             # compile the theano function
             fn = theano.function(

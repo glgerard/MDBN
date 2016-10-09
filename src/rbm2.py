@@ -410,6 +410,33 @@ class RBM(object):
 
         print ('Training took %f minutes' % (pretraining_time / 60.))
 
+class GRBM(RBM):
+    # Implement a Gaussian-Bernoulli Restricted Boltzmann Machine
+    def __init__(self,
+                 input=None,
+                 n_visible=784,
+                 n_hidden=500,
+                 W=None,
+                 hbias=None,
+                 vbias=None,
+                 numpy_rng=None,
+                 theano_rng=None):
+        super(GRBM, self).__init__(input, n_visible, n_hidden,
+                                   W, hbias, vbias, numpy_rng, theano_rng)
+
+    def sample_v_given_h(self, h0_sample):
+        ''' This function infers state of visible units given hidden units '''
+        # compute the activation of the visible given the hidden sample
+        v1_mean = tensor.dot(h0_sample, self.Wt) + self.vbias
+
+        # get a sample of the visible given their activation
+#        v1_sample = v1_mean + self.srng.normal(size=v1_mean.shape,
+#                                               avg=0, std=1.0,
+#                                               dtype=theano.config.floatX)
+        # Error free reconstruction
+        v1_sample = v1_mean
+        return [None, v1_mean, v1_sample]
+
 def test_rbm(learning_rate=0.1, training_epochs=15,
              datafile='../data/train-images-idx3-ubyte', batch_size=20,
              n_chains=20, n_samples=10, output_folder='rbm_plots',
@@ -454,7 +481,7 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
     os.chdir(output_folder)
 
     # construct the RBM class
-    rbm = RBM(input=x, n_visible=mnist.sizeX * mnist.sizeY,
+    rbm = GRBM(input=x, n_visible=mnist.sizeX * mnist.sizeY,
               n_hidden=n_hidden, numpy_rng=rng, theano_rng=theano_rng)
 
     rbm.training(train_set_x, training_epochs, batch_size, learning_rate, display_fn=mnist.display_weigths)
