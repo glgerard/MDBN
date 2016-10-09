@@ -435,7 +435,7 @@ class GRBM(RBM):
 #                                               dtype=theano.config.floatX)
         # Error free reconstruction
         v1_sample = v1_mean
-        return [None, v1_mean, v1_sample]
+        return [v1_mean, v1_mean, v1_sample]
 
 def test_rbm(learning_rate=0.1, training_epochs=15,
              datafile='../data/train-images-idx3-ubyte', batch_size=20,
