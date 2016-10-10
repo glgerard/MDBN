@@ -6,7 +6,7 @@ import scipy.misc
 from src.utils import load_MNIST
 from src.utils import display_weigths
 from src.utils import display_samples
-from src.utils import normalize
+from src.utils import normalize_img
 
 class GRBM(object):
     # Implement a Gaussian-Bernoulli Restricted Boltzmann Machine
@@ -38,9 +38,9 @@ class GRBM(object):
 
     def v_sample(self, h):
         # Derive a sample of visible units from the hidden units h
-        mu = self.a + T.dot(h,self.W.T)
+        mu = self.a + T.dot(h, self.W.T)
 #        v_sample = mu + self.srng.normal(size=mu.shape, avg=0, std=1.0, dtype=theano.config.floatX)
-        v_sample = mu # error-free reconstruction
+        v_sample = mu  # error-free reconstruction
         return [mu, v_sample]
 
     def h_sample(self, v):
@@ -65,12 +65,6 @@ class GRBM(object):
         nv_prob, nv_sample = self.v_sample(nh_prob)
         return [nv_prob, nv_sample, nh_prob, nh_sample]
 
-    def free_energy(self, v_sample):
-        wx_b = T.dot(v_sample, self.W) + self.b
-        vbias_term = 0.5 * T.dot((v_sample - self.a), (v_sample - self.a).T)
-        hidden_term = T.sum(T.nnet.softplus(wx_b), axis=1)
-        return -hidden_term - vbias_term
-
     def CD(self, k=1, eps=0.01):
         # Contrastive divergence
         # Positive phase
@@ -86,19 +80,28 @@ class GRBM(object):
                                  n_steps=k,
                                  name="gibbs_update")
 
+        vK_prob = nv_probs[-1]
         vK_sample = nv_samples[-1]
+        hK_prob = nh_probs[-1]
+        hK_sample = nh_samples[-1]
 
-        cost = T.mean(self.free_energy(self.input)) - T.mean(
-            self.free_energy(vK_sample))
+        # See https://www.cs.toronto.edu/~kriz/learning-features-2009-TR.pdf
+        # I keep sigma unit as reported in https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf 13.2
+
+        w_grad = (T.dot(self.input.T, h0_prob) - T.dot(vK_prob.T, hK_prob))/\
+                 T.cast(self.input.shape[0],dtype=theano.config.floatX)
+
+        a_grad = T.mean(self.input - vK_prob, axis=0)
+
+        b_grad = T.mean(h0_prob - hK_prob, axis=0)
+
         params = [self.a, self.b, self.W]
-
-        # We must not compute the gradient through the gibbs sampling
-        gparams = T.grad(cost, params, consider_constant=[self.input, vK_sample])
+        gparams = [a_grad, b_grad, w_grad]
 
         for param, gparam in zip(params, gparams):
-            updates[param] = param - gparam * T.cast(eps,dtype=theano.config.floatX)
+            updates[param] = param + gparam * T.cast(eps,dtype=theano.config.floatX)
 
-        dist = T.mean(T.sqr(self.input - vK_sample))
+        dist = T.mean(T.sqr(self.input - vK_prob))
         return dist, updates
 
 def test_grbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200):
@@ -110,7 +113,7 @@ def test_grbm(batch_size = 20, training_epochs = 15, k=1, n_hidden=200):
     # 13.2: "it is [...] easier to first normalise each component of the data to have zero
     #        mean and unit variance and then to use noise free reconstructions, with the variance
     #        in equation 17 set to 1"
-    dataset = normalize(r_dataset)
+    dataset = normalize_img(r_dataset)
 
     index = T.lscalar('index')
     x = T.matrix('x')
