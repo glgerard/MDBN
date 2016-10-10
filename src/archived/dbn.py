@@ -1,13 +1,14 @@
 import numpy as np
-import theano
-from theano import pp, tensor
 import scipy.misc
-from rbm import RBM
-from rbm import GRBM
-from utils import load_MNIST
-from utils import display_weigths
-from utils import display_samples
-from utils import normalize_img
+import theano
+from theano import tensor
+
+from src.archived.rbm_v1 import GRBM
+from src.archived.rbm_v1 import RBM
+from src.utils import display_weigths
+from src.utils import load_MNIST
+from src.utils import normalize_img
+
 
 class DBN(object):
     def __init__(self, n_input, hidden_layers_sizes, n_output):

@@ -30,6 +30,8 @@ import os
 import numpy
 import theano
 from theano import tensor
+from theano.tensor import nnet
+
 #from theano.tensor.shared_randomstreams import RandomStreams
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 
@@ -143,7 +145,7 @@ class RBM(object):
         ''' Function to compute the free energy '''
         wx_b = tensor.dot(v_sample, self.W) + self.hbias
         vbias_term = tensor.dot(v_sample, self.vbias)
-        hidden_term = tensor.sum(tensor.log(1 + tensor.exp(wx_b)), axis=1)
+        hidden_term = tensor.sum(nnet.softplus(wx_b), axis=1)
         return -hidden_term - vbias_term
 
     def propup(self, vis):
@@ -158,7 +160,7 @@ class RBM(object):
 
         '''
         pre_sigmoid_activation = tensor.dot(vis, self.W) + self.hbias
-        return [pre_sigmoid_activation, tensor.nnet.sigmoid(pre_sigmoid_activation)]
+        return [pre_sigmoid_activation, nnet.sigmoid(pre_sigmoid_activation)]
 
     def sample_h_given_v(self, v0_sample):
         ''' This function infers state of hidden units given visible units '''
@@ -186,7 +188,7 @@ class RBM(object):
 
         '''
         pre_sigmoid_activation = tensor.dot(hid, self.Wt) + self.vbias
-        return [pre_sigmoid_activation, tensor.nnet.sigmoid(pre_sigmoid_activation)]
+        return [pre_sigmoid_activation, nnet.sigmoid(pre_sigmoid_activation)]
 
     def sample_v_given_h(self, h0_sample):
         ''' This function infers state of visible units given hidden units '''
@@ -332,7 +334,7 @@ class RBM(object):
 
         # equivalent to e^(-FE(x_i)) / (e^(-FE(x_i)) + e^(-FE(x_{\i})))
         cost = tensor.mean(self.n_visible *
-                           tensor.log(tensor.nnet.sigmoid(fe_xi_flip - fe_xi)))
+                           tensor.log(nnet.sigmoid(fe_xi_flip - fe_xi)))
 
         # increment bit_i_idx % number as part of updates
         updates[bit_i_idx] = (bit_i_idx + 1) % self.n_visible
@@ -371,8 +373,8 @@ class RBM(object):
 
         cross_entropy = tensor.mean(
             tensor.sum(
-                self.input * tensor.log(tensor.nnet.sigmoid(pre_sigmoid_nv)) +
-                (1 - self.input) * tensor.log(1 - tensor.nnet.sigmoid(pre_sigmoid_nv)),
+                self.input * tensor.log(nnet.sigmoid(pre_sigmoid_nv)) +
+                (1 - self.input) * tensor.log(1 - nnet.sigmoid(pre_sigmoid_nv)),
                 axis=1
             )
         )
@@ -462,6 +464,12 @@ class GRBM(RBM):
         # Error free reconstruction
         v1_sample = v1_mean
         return [v1_mean, v1_mean, v1_sample]
+
+    def free_energy(self, v_sample):
+        wx_b = tensor.dot(v_sample, self.W) + self.hbias
+        vbias_term = 0.5*tensor.sum((v_sample - self.vbias) ** 2, axis=1)
+        hidden_term = tensor.sum(nnet.softplus(wx_b), axis=1)
+        return -hidden_term + vbias_term
 
 def test_rbm(learning_rate=0.1, training_epochs=15,
              datafile='../data/train-images-idx3-ubyte', batch_size=20,
