@@ -228,7 +228,8 @@ class RBM(object):
         return [pre_sigmoid_h1, h1_mean, h1_sample,
                 pre_sigmoid_v1, v1_mean, v1_sample]
 
-    def get_cost_updates(self, lr=0.1, batch_size=None, persistent=None, k=1):
+    def get_cost_updates(self, lr=0.1, k=1, lambda1=0, lambda2=0,
+                         batch_size=None, persistent=None):
         """This functions implements one step of CD-k or PCD-k
 
         :param lr: learning rate used to train the RBM
@@ -294,17 +295,27 @@ class RBM(object):
             vbias_grad = - tensor.mean(self.input - nv_means[-1], axis=0)
 
             hbias_grad = - tensor.mean(ph_mean - nh_means[-1], axis=0)
+            W_grad = W_grad / (1+2*tensor.cast(lr*lambda1,dtype=theano.config.floatX)/\
+                tensor.abs_(self.W))
             gparams = [W_grad, hbias_grad, vbias_grad ]
         else:
             cost = tensor.mean(self.free_energy(self.input)) -\
                    tensor.mean(self.free_energy(chain_end))
             # We must not compute the gradient through the gibbs sampling
             gparams = tensor.grad(cost, self.params, consider_constant=[chain_end])
+            gparams[0] = gparams[0] / (1+2*tensor.cast(lr*lambda1,dtype=theano.config.floatX)/\
+                tensor.abs_(self.W))
 
         # constructs the update dictionary
-        for gparam, param in zip(gparams, self.params):
+        multipliers = [
+            (1-2*tensor.cast(lr*lambda2,dtype=theano.config.floatX))/\
+            (1+2*tensor.cast(lr*lambda1,dtype=theano.config.floatX)/\
+                tensor.abs_(self.W)),
+            1.0,1.0]
+
+        for gparam, param, multiplier in zip(gparams, self.params, multipliers):
             # make sure that the learning rate is of the right dtype
-            updates[param] = param - gparam * tensor.cast(
+            updates[param] = param * multiplier - gparam * tensor.cast(
                 lr,
                 dtype=theano.config.floatX
             )
