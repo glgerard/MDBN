@@ -139,7 +139,18 @@ class RBM(object):
         # **** WARNING: It is not a good idea to put things in this list
         # other than shared variables created in this function.
         self.params = [self.W, self.hbias, self.vbias]
-        # end-snippet-1
+
+        # Parameters to implement momentum
+        # See: Hinton, "A Practical Guide to Training Restricted Boltzmann Machines",
+        # UTML TR 2010-003, 2010. Section 9
+
+        self.momentum = tensor.cast(0.0, dtype=theano.config.floatX)
+
+        W_grad = numpy.zeros((n_visible, n_hidden), dtype=theano.config.floatX)
+        hbias_grad = numpy.ones(n_hidden, dtype=theano.config.floatX)
+        vbias_grad = numpy.ones(n_visible, dtype=theano.config.floatX)
+
+        self.gparams = [W_grad, hbias_grad, vbias_grad]
 
     def free_energy(self, v_sample):
         ''' Function to compute the free energy '''
@@ -228,7 +239,9 @@ class RBM(object):
         return [pre_sigmoid_h1, h1_mean, h1_sample,
                 pre_sigmoid_v1, v1_mean, v1_sample]
 
-    def get_cost_updates(self, lr=0.1, k=1, lambda1=0, lambda2=0,
+    def get_cost_updates(self, lr=0.1, k=1,
+                         lambda_1=0.0, lambda_2=0.0,
+                         weightcost = 0.0,
                          batch_size=None, persistent=None):
         """This functions implements one step of CD-k or PCD-k
 
@@ -239,6 +252,14 @@ class RBM(object):
             variable of size (batch size, number of hidden units).
 
         :param k: number of Gibbs steps to do in CD-k/PCD-k
+
+        :param lambda_1: gradual shrinkage (?)
+
+        :param lambda_2: gradual shrinkage (?)
+
+        :param weightcost: L2 weight-decay (see Hinton 2010
+            "A Practical Guide to Training Restricted Boltzmann
+            Machines" section 10
 
         Returns a proxy for the cost and the updates dictionary. The
         dictionary contains the update rules for weights and biases but
@@ -288,32 +309,36 @@ class RBM(object):
         chain_end = nv_samples[-1]
 
         if batch_size is not None:
-            W_grad =  - ((tensor.dot(self.input.T, ph_mean) -
+            W_grad =  self.gparams[0] * tensor.cast(self.momentum, dtype=theano.config.floatX) \
+                      - ((tensor.dot(self.input.T, ph_mean) -
                          tensor.dot(nv_means[-1].T, nh_means[-1])))/\
-                        tensor.cast(batch_size,dtype=theano.config.floatX)
+                        tensor.cast(batch_size,dtype=theano.config.floatX) - \
+                        tensor.cast(weightcost, dtype=theano.config.floatX) * self.W
 
-            vbias_grad = - tensor.mean(self.input - nv_means[-1], axis=0)
+            hbias_grad = self.gparams[1] * tensor.cast(self.momentum, dtype=theano.config.floatX) \
+                         - tensor.mean(ph_mean - nh_means[-1], axis=0)
 
-            hbias_grad = - tensor.mean(ph_mean - nh_means[-1], axis=0)
-            W_grad = W_grad / (1+2*tensor.cast(lr*lambda1,dtype=theano.config.floatX)/\
-                tensor.abs_(self.W))
-            gparams = [W_grad, hbias_grad, vbias_grad ]
+            vbias_grad = self.gparams[2] * tensor.cast(self.momentum, dtype=theano.config.floatX) \
+                         - tensor.mean(self.input - nv_means[-1], axis=0)
+
+            self.gparams = [W_grad, hbias_grad, vbias_grad ]
         else:
             cost = tensor.mean(self.free_energy(self.input)) -\
                    tensor.mean(self.free_energy(chain_end))
             # We must not compute the gradient through the gibbs sampling
-            gparams = tensor.grad(cost, self.params, consider_constant=[chain_end])
-            gparams[0] = gparams[0] / (1+2*tensor.cast(lr*lambda1,dtype=theano.config.floatX)/\
-                tensor.abs_(self.W))
+            self.gparams = tensor.grad(cost, self.params, consider_constant=[chain_end])
+
+        self.gparams[0] = self.gparams[0] / (1 + 2 * tensor.cast(lr * lambda_1, dtype=theano.config.floatX) / \
+                                    tensor.abs_(self.W))
 
         # constructs the update dictionary
         multipliers = [
-            (1-2*tensor.cast(lr*lambda2,dtype=theano.config.floatX))/\
-            (1+2*tensor.cast(lr*lambda1,dtype=theano.config.floatX)/\
-                tensor.abs_(self.W)),
-            1.0,1.0]
+            (1 - 2 * tensor.cast(lr * lambda_2, dtype=theano.config.floatX)) / \
+            (1 + 2 * tensor.cast(lr * lambda_1, dtype=theano.config.floatX) / \
+             tensor.abs_(self.W)),
+            1,1]
 
-        for gparam, param, multiplier in zip(gparams, self.params, multipliers):
+        for gparam, param, multiplier in zip(self.gparams, self.params, multipliers):
             # make sure that the learning rate is of the right dtype
             updates[param] = param * multiplier - gparam * tensor.cast(
                 lr,
@@ -401,10 +426,12 @@ class RBM(object):
 
         return cross_entropy
 
-    def training(self, train_set_x, training_epochs, batch_size, learning_rate, display_fn=None):
+    def training(self, train_set_x, training_epochs, batch_size, learning_rate,
+                 initial_momentum = 0.0, final_momentum = 0.0,
+                 weightcost = 0.0, display_fn=None):
         # allocate symbolic variables for the data
         index = tensor.lscalar()  # index to a [mini]batch
-
+        momentum = tensor.scalar('momentum', dtype=theano.config.floatX)
         # initialize storage for the persistent chain (state = hidden
         # layer of chain)
         persistent_chain = theano.shared(numpy.zeros((batch_size, self.n_hidden),
@@ -412,17 +439,21 @@ class RBM(object):
                                          borrow=True)
 
         # get the cost and the gradient corresponding to one step of CD-15
-        cost, updates = self.get_cost_updates(lr=learning_rate,batch_size=batch_size,
-                                             persistent=persistent_chain, k=15)
+        cost, updates = self.get_cost_updates(lr=learning_rate,
+                                              batch_size=batch_size,
+                                              weightcost=weightcost,
+                                              persistent=persistent_chain,
+                                              k=15)
 
         # it is ok for a theano function to have no output
         # the purpose of train_rbm is solely to update the RBM parameters
         train_rbm = theano.function(
-            [index],
+            [index, momentum],
             cost,
             updates=updates,
             givens={
-                self.input: train_set_x[index * batch_size: (index + 1) * batch_size]
+                self.input: train_set_x[index * batch_size: (index + 1) * batch_size],
+                self.momentum: momentum
             },
             name='train_rbm'
         )
@@ -434,12 +465,17 @@ class RBM(object):
         start_time = timeit.default_timer()
 
         # go through training epochs
+        momentum = initial_momentum
         for epoch in range(training_epochs):
+
+            if epoch == 6:
+                momentum = final_momentum
 
             # go through the training set
             mean_cost = []
+
             for batch_index in range(n_train_batches):
-                mean_cost += [train_rbm(batch_index)]
+                mean_cost += [train_rbm(batch_index, momentum)]
 
             print('Training epoch %d, cost is ' % epoch, numpy.mean(mean_cost))
 
@@ -535,10 +571,13 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
     os.chdir(output_folder)
 
     # construct the RBM class
-    rbm = GRBM(input=x, n_visible=mnist.sizeX * mnist.sizeY,
+    rbm = RBM(input=x, n_visible=mnist.sizeX * mnist.sizeY,
               n_hidden=n_hidden, numpy_rng=rng, theano_rng=theano_rng)
 
-    rbm.training(train_set_x, training_epochs, batch_size, learning_rate, display_fn=mnist.display_weigths)
+    rbm.training(train_set_x, training_epochs, batch_size, learning_rate,
+                 initial_momentum=0.5, final_momentum=0.9,
+                 weightcost=0.0002,
+                 display_fn=mnist.display_weigths)
 
     #################################
     #     Sampling from the RBM     #
