@@ -147,11 +147,18 @@ class RBM(object):
 
         self.momentum = tensor.cast(0.0, dtype=theano.config.floatX)
 
-        W_grad = numpy.zeros((n_visible, n_hidden), dtype=theano.config.floatX)
-        hbias_grad = numpy.ones(n_hidden, dtype=theano.config.floatX)
-        vbias_grad = numpy.ones(n_visible, dtype=theano.config.floatX)
+        self.W_grad = theano.shared(
+            numpy.zeros((n_visible, n_hidden), dtype=theano.config.floatX),
+            name='W_grad',
+            borrow=True)
+        self.hbias_grad = theano.shared(numpy.zeros(n_hidden, dtype=theano.config.floatX),
+                                        name='hbias_grad',
+                                        borrow=True)
+        self.vbias_grad = theano.shared(numpy.zeros(n_visible, dtype=theano.config.floatX),
+                                        name='vbias_grad',
+                                        borrow=True)
 
-        self.gparams = [W_grad, hbias_grad, vbias_grad]
+        self.gparams = [self.W_grad, self.hbias_grad, self.vbias_grad]
 
     def free_energy(self, v_sample):
         ''' Function to compute the free energy '''
@@ -310,27 +317,25 @@ class RBM(object):
         chain_end = nv_samples[-1]
 
         if batch_size is not None:
-            W_grad =  self.gparams[0] * tensor.cast(self.momentum, dtype=theano.config.floatX) \
-                      - ((tensor.dot(self.input.T, ph_mean) -
+            W_grad =  ((tensor.dot(self.input.T, ph_mean) -
                          tensor.dot(nv_means[-1].T, nh_means[-1])))/\
                         tensor.cast(batch_size,dtype=theano.config.floatX) - \
                         tensor.cast(weightcost, dtype=theano.config.floatX) * self.W
 
-            hbias_grad = self.gparams[1] * tensor.cast(self.momentum, dtype=theano.config.floatX) \
-                         - tensor.mean(ph_mean - nh_means[-1], axis=0)
+            hbias_grad = tensor.mean(ph_mean - nh_means[-1], axis=0)
 
-            vbias_grad = self.gparams[2] * tensor.cast(self.momentum, dtype=theano.config.floatX) \
-                         - tensor.mean(self.input - nv_means[-1], axis=0)
+            vbias_grad = tensor.mean(self.input - nv_means[-1], axis=0)
 
-            self.gparams = [W_grad, hbias_grad, vbias_grad ]
+            gparams = [W_grad, hbias_grad, vbias_grad ]
         else:
-            cost = tensor.mean(self.free_energy(self.input)) -\
-                   tensor.mean(self.free_energy(chain_end))
+            cost = tensor.mean(self.free_energy(self.input)) - \
+                    tensor.mean(self.free_energy(chain_end))
+
             # We must not compute the gradient through the gibbs sampling
-            self.gparams = tensor.grad(cost, self.params, consider_constant=[chain_end])
+            gparams = tensor.grad(cost, self.params, consider_constant=[chain_end])
 
 # ISSUE: it returns Inf when Wij is small
-#        self.gparams[0] = self.gparams[0] / (1 + 2 * tensor.cast(lr * lambda_1, dtype=theano.config.floatX) / \
+#        gparams[0] = gparams[0] / (1 + 2 * tensor.cast(lr * lambda_1, dtype=theano.config.floatX) / \
 #                                    tensor.abs_(self.W))
 
         # constructs the update dictionary
@@ -342,12 +347,13 @@ class RBM(object):
             #            tensor.abs_(self.W)),
             1,1]
 
-        for gparam, param, multiplier in zip(self.gparams, self.params, multipliers):
+        m = tensor.cast(self.momentum, dtype=theano.config.floatX)
+        s = tensor.cast(lr, dtype=theano.config.floatX)
+        for gparam, param, multiplier, sgparam in zip(gparams, self.params, multipliers, self.gparams):
             # make sure that the learning rate is of the right dtype
-            updates[param] = param * multiplier - gparam * tensor.cast(
-                lr,
-                dtype=theano.config.floatX
-            )
+            # update rules as in https://github.com/lisa-lab/pylearn2/blob/master/pylearn2/models/rbm.py
+            updates[param] = param * multiplier + sgparam
+            updates[sgparam] = m * sgparam + s * gparam
 
         if persistent:
             # Note that this works only if persistent is a shared variable
@@ -582,7 +588,7 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
 
     rbm.training(train_set_x, training_epochs, batch_size, learning_rate,
                  initial_momentum=0.5, final_momentum=0.9,
-                 weightcost=0.0002,
+                 weightcost=0.0,
                  display_fn=mnist.display_weigths)
 
     #################################
@@ -651,4 +657,4 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
     os.chdir('../')
 
 if __name__ == '__main__':
-    test_rbm(training_epochs=3)
+    test_rbm(training_epochs=15)
