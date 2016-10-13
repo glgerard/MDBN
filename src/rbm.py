@@ -31,6 +31,7 @@ import numpy
 import theano
 from theano import tensor
 from theano.tensor import nnet
+from theano.compile.nanguardmode import NanGuardMode
 
 #from theano.tensor.shared_randomstreams import RandomStreams
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
@@ -328,14 +329,17 @@ class RBM(object):
             # We must not compute the gradient through the gibbs sampling
             self.gparams = tensor.grad(cost, self.params, consider_constant=[chain_end])
 
-        self.gparams[0] = self.gparams[0] / (1 + 2 * tensor.cast(lr * lambda_1, dtype=theano.config.floatX) / \
-                                    tensor.abs_(self.W))
+# ISSUE: it returns Inf when Wij is small
+#        self.gparams[0] = self.gparams[0] / (1 + 2 * tensor.cast(lr * lambda_1, dtype=theano.config.floatX) / \
+#                                    tensor.abs_(self.W))
 
         # constructs the update dictionary
         multipliers = [
-            (1 - 2 * tensor.cast(lr * lambda_2, dtype=theano.config.floatX)) / \
-            (1 + 2 * tensor.cast(lr * lambda_1, dtype=theano.config.floatX) / \
-             tensor.abs_(self.W)),
+            (1 - 2 * tensor.cast(lr * lambda_2, dtype=theano.config.floatX)),
+            # Issue: it returns Inf when Wij is small
+            #           (1 - 2 * tensor.cast(lr * lambda_2, dtype=theano.config.floatX)) / \
+            #           (1 + 2 * tensor.cast(lr * lambda_1, dtype=theano.config.floatX) / \
+            #            tensor.abs_(self.W)),
             1,1]
 
         for gparam, param, multiplier in zip(self.gparams, self.params, multipliers):
@@ -378,8 +382,7 @@ class RBM(object):
         fe_xi_flip = self.free_energy(xi_flip)
 
         # equivalent to e^(-FE(x_i)) / (e^(-FE(x_i)) + e^(-FE(x_{\i})))
-        cost = tensor.mean(self.n_visible *
-                           tensor.log(nnet.sigmoid(fe_xi_flip - fe_xi)))
+        cost = - tensor.mean(self.n_visible * nnet.softplus(fe_xi - fe_xi_flip))
 
         # increment bit_i_idx % number as part of updates
         updates[bit_i_idx] = (bit_i_idx + 1) % self.n_visible
@@ -415,6 +418,8 @@ class RBM(object):
         that Theano can catch and optimize the expression.
 
         """
+
+        # TODO: use nnet.binary_crossentropy()
 
         cross_entropy = tensor.mean(
             tensor.sum(
@@ -456,6 +461,7 @@ class RBM(object):
                 self.momentum: momentum
             },
             name='train_rbm'
+#            ,mode=NanGuardMode(nan_is_error=True, inf_is_error=True, big_is_error=True)
         )
 
         # compute number of minibatches for training, validation and testing
