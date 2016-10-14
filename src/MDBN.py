@@ -262,7 +262,8 @@ class DBN(object):
 
         # index to a [mini]batch
         index = tensor.lscalar('index')  # index to a minibatch
-        learning_rate = tensor.scalar('lr')  # learning rate to use
+        learning_rate = tensor.scalar('lr', dtype=theano.config.floatX)  # learning rate to use
+        momentum = tensor.scalar('momentum', dtype=theano.config.floatX)
 
         pretrain_fns = []
         for rbm in self.rbm_layers:
@@ -270,9 +271,16 @@ class DBN(object):
             # get the cost and the updates list
             # using CD-k here (persisent=None) for training each RBM.
             # TODO: change cost function to reconstruction error
-            cost, updates = rbm.get_cost_updates(learning_rate,
-                                                 batch_size=batch_size,
-                                                 persistent=None, k=k)
+            if self.gauss == True:
+                cost, updates = rbm.get_cost_updates(learning_rate,
+                                                     lambda_2 = 0.1,
+                                                     batch_size=batch_size,
+                                                     persistent=None, k=k)
+            else:
+                cost, updates = rbm.get_cost_updates(learning_rate,
+                                                     weightcost = 0.002,
+                                                     batch_size=batch_size,
+                                                     persistent=None, k=k)
 
             # compile the theano function
             if monitor:
@@ -289,11 +297,12 @@ class DBN(object):
                 )
             else:
                 fn = theano.function(
-                    inputs=[index, theano.In(learning_rate, value=0.1)],
+                    inputs=[index, momentum, theano.In(learning_rate, value=0.1)],
                     outputs=cost,
                     updates=updates,
                     givens={
-                        self.x: train_set_x[index * batch_size:(index+1)*batch_size]
+                        self.x: train_set_x[index * batch_size:(index+1)*batch_size],
+                        self.momentum: momentum
                     }
                 )
             # append `fn` to the list of functions
@@ -301,7 +310,8 @@ class DBN(object):
 
         return pretrain_fns
 
-    def pretraining(self, train_set_x, n_train_batches, batch_size, k, pretraining_epochs, pretrain_lr,
+    def pretraining(self, train_set_x, n_train_batches, batch_size, k,
+                    pretraining_epochs, pretrain_lr,
                     monitor=False):
         #########################
         # PRETRAINING THE MODEL #
@@ -316,13 +326,20 @@ class DBN(object):
         print('... pre-training the model')
         start_time = timeit.default_timer()
         # Pre-train layer-wise
+        if self.gauss == False:
+            momentum = 0.6
+        else:
+            momentum = 0.0
         for i in range(self.n_layers):
             # go through pretraining epochs
             for epoch in range(pretraining_epochs[i]):
                 # go through the training set
                 c = []
+                if self.gauss == False and epoch == 6:
+                    momentum = 0.9
                 for batch_index in range(n_train_batches):
                     c.append(pretraining_fns[i](index=batch_index,
+                                                momentum=momentum,
                                                 lr=pretrain_lr[i]))
                 print('Pre-training layer %i, epoch %d, cost ' % (i, epoch), end=' ')
                 print(numpy.mean(c))
