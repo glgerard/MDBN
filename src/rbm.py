@@ -104,6 +104,7 @@ class RBM(object):
             )
             # theano shared variables for weights and biases
             W = theano.shared(value=initial_W, name='W', borrow=True)
+            Wt = theano.shared(value=initial_W.T, name='Wt', borrow=True)
 
         if hbias is None:
             # create shared variable for hidden units bias
@@ -133,7 +134,7 @@ class RBM(object):
             self.input = tensor.matrix('input')
 
         self.W = W
-        self.Wt = W.T
+        self.Wt = Wt
         self.hbias = hbias
         self.vbias = vbias
         self.theano_rng = theano_rng
@@ -145,20 +146,20 @@ class RBM(object):
         # See: Hinton, "A Practical Guide to Training Restricted Boltzmann Machines",
         # UTML TR 2010-003, 2010. Section 9
 
-        self.momentum = tensor.cast(0.0, dtype=theano.config.floatX)
+        self.momentum = tensor.cast(0, dtype=theano.config.floatX)
 
-        self.W_grad = theano.shared(
+        self.W_speed = theano.shared(
             numpy.zeros((n_visible, n_hidden), dtype=theano.config.floatX),
-            name='W_grad',
+            name='W_speed',
             borrow=True)
-        self.hbias_grad = theano.shared(numpy.zeros(n_hidden, dtype=theano.config.floatX),
-                                        name='hbias_grad',
+        self.hbias_speed = theano.shared(numpy.zeros(n_hidden, dtype=theano.config.floatX),
+                                        name='hbias_speed',
                                         borrow=True)
-        self.vbias_grad = theano.shared(numpy.zeros(n_visible, dtype=theano.config.floatX),
-                                        name='vbias_grad',
+        self.vbias_speed = theano.shared(numpy.zeros(n_visible, dtype=theano.config.floatX),
+                                        name='vbias_speed',
                                         borrow=True)
 
-        self.gparams = [self.W_grad, self.hbias_grad, self.vbias_grad]
+        self.params_speed = [self.W_speed, self.hbias_speed, self.vbias_speed]
 
     def free_energy(self, v_sample):
         ''' Function to compute the free energy '''
@@ -317,22 +318,23 @@ class RBM(object):
         chain_end = nv_samples[-1]
 
         if batch_size is not None:
-            W_grad =  ((tensor.dot(self.input.T, ph_mean) -
-                         tensor.dot(nv_means[-1].T, nh_means[-1])))/\
+            W_grad =  (tensor.dot(self.input.T, ph_mean) -
+                        tensor.dot(nv_means[-1].T, nh_means[-1]))/\
                         tensor.cast(batch_size,dtype=theano.config.floatX) - \
-                        tensor.cast(weightcost, dtype=theano.config.floatX) * self.W
+                        tensor.cast(weightcost, dtype=theano.config.floatX) * \
+                            self.W.get_value(borrow=True)
 
             hbias_grad = tensor.mean(ph_mean - nh_means[-1], axis=0)
 
             vbias_grad = tensor.mean(self.input - nv_means[-1], axis=0)
 
-            gparams = [W_grad, hbias_grad, vbias_grad ]
+            gradients = [W_grad, hbias_grad, vbias_grad ]
         else:
-            cost = tensor.mean(self.free_energy(self.input)) - \
-                    tensor.mean(self.free_energy(chain_end))
+            cost = tensor.mean(self.free_energy(chain_end)) - \
+                   tensor.mean(self.free_energy(self.input))
 
             # We must not compute the gradient through the gibbs sampling
-            gparams = tensor.grad(cost, self.params, consider_constant=[chain_end])
+            gradients = tensor.grad(cost, self.params, consider_constant=[chain_end])
 
 # ISSUE: it returns Inf when Wij is small
 #        gparams[0] = gparams[0] / (1 + 2 * tensor.cast(lr * lambda_1, dtype=theano.config.floatX) / \
@@ -340,20 +342,22 @@ class RBM(object):
 
         # constructs the update dictionary
         multipliers = [
-            (1 - 2 * tensor.cast(lr * lambda_2, dtype=theano.config.floatX)),
+            (1 - 2 * lr * lambda_2),
             # Issue: it returns Inf when Wij is small
             #           (1 - 2 * tensor.cast(lr * lambda_2, dtype=theano.config.floatX)) / \
             #           (1 + 2 * tensor.cast(lr * lambda_1, dtype=theano.config.floatX) / \
             #            tensor.abs_(self.W)),
             1,1]
 
-        m = tensor.cast(self.momentum, dtype=theano.config.floatX)
-        s = tensor.cast(lr, dtype=theano.config.floatX)
-        for gparam, param, multiplier, sgparam in zip(gparams, self.params, multipliers, self.gparams):
+        for gradient, param, multiplier, param_speed in zip(gradients, self.params,
+                                                        multipliers, self.params_speed):
             # make sure that the learning rate is of the right dtype
             # update rules as in https://github.com/lisa-lab/pylearn2/blob/master/pylearn2/models/rbm.py
-            updates[param] = param * multiplier + sgparam
-            updates[sgparam] = m * sgparam + s * gparam
+            updates[param_speed] = gradient + (param_speed - gradient) * \
+                                   tensor.cast(self.momentum, dtype=theano.config.floatX)
+
+            updates[param] = param * tensor.cast(multiplier, dtype=theano.config.floatX) + \
+                             param_speed * tensor.cast(lr, dtype=theano.config.floatX)
 
         if persistent:
             # Note that this works only if persistent is a shared variable
@@ -362,8 +366,7 @@ class RBM(object):
             monitoring_cost = self.get_pseudo_likelihood_cost(updates)
         else:
             # reconstruction cross-entropy is a better proxy for CD
-            monitoring_cost = self.get_reconstruction_cost(updates,
-                                                           pre_sigmoid_nvs[-1])
+            monitoring_cost = self.get_reconstruction_cost(pre_sigmoid_nvs[-1])
 
         return monitoring_cost, updates
 
@@ -395,7 +398,7 @@ class RBM(object):
 
         return cost
 
-    def get_reconstruction_cost(self, updates, pre_sigmoid_nv):
+    def get_reconstruction_cost(self, pre_sigmoid_nv):
         """Approximation to the reconstruction error
 
         Note that this function requires the pre-sigmoid activation as
@@ -425,15 +428,8 @@ class RBM(object):
 
         """
 
-        # TODO: use nnet.binary_crossentropy()
-
-        cross_entropy = tensor.mean(
-            tensor.sum(
-                self.input * tensor.log(nnet.sigmoid(pre_sigmoid_nv)) +
-                (1 - self.input) * tensor.log(1 - nnet.sigmoid(pre_sigmoid_nv)),
-                axis=1
-            )
-        )
+        cross_entropy = nnet.binary_crossentropy(
+                            nnet.sigmoid(pre_sigmoid_nv),self.input).sum(axis=1).mean()
 
         return cross_entropy
 
@@ -454,8 +450,8 @@ class RBM(object):
                                               batch_size=batch_size,
                                               weightcost=weightcost,
                                               persistent=persistent_chain,
-                                              k=15)
-
+#                                              k=15
+                                              )
         # it is ok for a theano function to have no output
         # the purpose of train_rbm is solely to update the RBM parameters
         train_rbm = theano.function(
@@ -526,9 +522,9 @@ class GRBM(RBM):
         v1_mean = tensor.dot(h0_sample, self.Wt) + self.vbias
 
         # get a sample of the visible given their activation
-#        v1_sample = v1_mean + self.srng.normal(size=v1_mean.shape,
-#                                               avg=0, std=1.0,
-#                                               dtype=theano.config.floatX)
+        #v1_sample = v1_mean + self.theano_rng.normal(size=v1_mean.shape,
+        #                                       avg=0, std=1.0,
+        #                                       dtype=theano.config.floatX)
         # Error free reconstruction
         v1_sample = v1_mean
         return [v1_mean, v1_mean, v1_sample]
@@ -565,10 +561,15 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
     mnist = MNIST(datafile)
     raw_dataset = mnist.images
     n_data = raw_dataset.shape[0]
-    dataset = raw_dataset/255
+    dataset = raw_dataset/255.0
 
     train_set_x = theano.shared(dataset[0:n_data*5/6], borrow=True)
     test_set_x = theano.shared(dataset[n_data*5/6:n_data], borrow=True)
+
+    # find out the number of test samples
+    number_of_test_samples = test_set_x.get_value(borrow=True).shape[0]
+
+    print('Number of test samples %d' % number_of_test_samples)
 
     x = tensor.matrix('x')  # the data is presented as rasterized images
 
@@ -583,19 +584,20 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
     os.chdir(output_folder)
 
     # construct the RBM class
-    rbm = RBM(input=x, n_visible=mnist.sizeX * mnist.sizeY,
+    rbm = GRBM(input=x, n_visible=mnist.sizeX * mnist.sizeY,
               n_hidden=n_hidden, numpy_rng=rng, theano_rng=theano_rng)
 
-    rbm.training(train_set_x, training_epochs, batch_size, learning_rate,
-                 initial_momentum=0.5, final_momentum=0.9,
-                 weightcost=0.0,
+    rbm.training(train_set_x,
+                 training_epochs,
+                 batch_size,
+                 learning_rate,
+#                 initial_momentum=0.6, final_momentum=0.9,
+#                 weightcost=0.0002,
                  display_fn=mnist.display_weigths)
 
     #################################
     #     Sampling from the RBM     #
     #################################
-    # find out the number of test samples
-    number_of_test_samples = test_set_x.get_value(borrow=True).shape[0]
 
     # pick random test examples, with which to initialize the persistent chain
     test_idx = rng.randint(number_of_test_samples - n_chains)
@@ -605,7 +607,7 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
             dtype=theano.config.floatX
         )
     )
-    plot_every = 1000
+    plot_every = 500
     # define one step of Gibbs sampling (mf = mean-field) define a
     # function that does `plot_every` steps before returning the
     # sample for plotting
@@ -657,4 +659,4 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
     os.chdir('../')
 
 if __name__ == '__main__':
-    test_rbm(training_epochs=15)
+    test_rbm(learning_rate=0.1, training_epochs=5)
