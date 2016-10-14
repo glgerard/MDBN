@@ -353,6 +353,7 @@ class RBM(object):
                                                         multipliers, self.params_speed):
             # make sure that the learning rate is of the right dtype
             # update rules as in https://github.com/lisa-lab/pylearn2/blob/master/pylearn2/models/rbm.py
+
             updates[param_speed] = gradient + (param_speed - gradient) * \
                                    tensor.cast(self.momentum, dtype=theano.config.floatX)
 
@@ -529,11 +530,38 @@ class GRBM(RBM):
         v1_sample = v1_mean
         return [v1_mean, v1_mean, v1_sample]
 
+    def gibbs_hvh(self, h0_sample):
+        ''' This function implements one step of Gibbs sampling,
+            starting from the hidden state'''
+        pre_sigmoid_v1, v1_mean, v1_sample = self.sample_v_given_h(h0_sample)
+        pre_sigmoid_h1, h1_mean, h1_sample = self.sample_h_given_v(v1_mean)
+        return [pre_sigmoid_v1, v1_mean, v1_sample,
+                pre_sigmoid_h1, h1_mean, h1_sample]
+
+    def gibbs_vhv(self, v0_sample):
+        ''' This function implements one step of Gibbs sampling,
+            starting from the visible state'''
+        pre_sigmoid_h1, h1_mean, h1_sample = self.sample_h_given_v(v0_sample)
+        pre_sigmoid_v1, v1_mean, v1_sample = self.sample_v_given_h(h1_mean)
+        return [pre_sigmoid_h1, h1_mean, h1_sample,
+                pre_sigmoid_v1, v1_mean, v1_sample]
+
     def free_energy(self, v_sample):
         wx_b = tensor.dot(v_sample, self.W) + self.hbias
         vbias_term = 0.5*tensor.sum((v_sample - self.vbias) ** 2, axis=1)
-        hidden_term = tensor.sum(nnet.softplus(wx_b), axis=1)
+        hidden_term = nnet.softplus(wx_b).sum(axis=1)
         return -hidden_term + vbias_term
+
+    def get_reconstruction_cost(self, pre_sigmoid_nv):
+        """
+        .. todo::
+            Write ME
+
+        """
+
+        error = ((nnet.sigmoid(pre_sigmoid_nv) - self.input) ** 2).sum(axis=1).mean()
+
+        return error
 
 def test_rbm(learning_rate=0.1, training_epochs=15,
              datafile='../data/train-images-idx3-ubyte', batch_size=20,
@@ -561,7 +589,9 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
     mnist = MNIST(datafile)
     raw_dataset = mnist.images
     n_data = raw_dataset.shape[0]
-    dataset = raw_dataset/255.0
+    dataset = raw_dataset/255.0     # for binary rbm
+    dataset = mnist.normalize(raw_dataset) # for gaussian rbm
+
 
     train_set_x = theano.shared(dataset[0:n_data*5/6], borrow=True)
     test_set_x = theano.shared(dataset[n_data*5/6:n_data], borrow=True)
@@ -591,8 +621,8 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
                  training_epochs,
                  batch_size,
                  learning_rate,
-#                 initial_momentum=0.6, final_momentum=0.9,
-#                 weightcost=0.0002,
+                 initial_momentum=0.6, final_momentum=0.9,
+                 weightcost=0.0002,
                  display_fn=mnist.display_weigths)
 
     #################################
@@ -659,4 +689,6 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
     os.chdir('../')
 
 if __name__ == '__main__':
-    test_rbm(learning_rate=0.1, training_epochs=5)
+
+# For Gaussian RBM use a smaller learning rate, 0.01 is a starting point
+    test_rbm(learning_rate=0.01, training_epochs=15)
