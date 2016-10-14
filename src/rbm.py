@@ -434,6 +434,7 @@ class RBM(object):
 
         return cross_entropy
 
+    # TODO: Gaussian Class should have a dedicated training (with lambda_2)
     def training(self, train_set_x, training_epochs, batch_size, learning_rate,
                  initial_momentum = 0.0, final_momentum = 0.0,
                  weightcost = 0.0, display_fn=None):
@@ -447,11 +448,13 @@ class RBM(object):
                                          borrow=True)
 
         # get the cost and the gradient corresponding to one step of CD-15
+
         cost, updates = self.get_cost_updates(lr=learning_rate,
+#                                              lambda_2=0.1,                # only for gaussian rbm
                                               batch_size=batch_size,
                                               weightcost=weightcost,
-                                              persistent=persistent_chain,
-#                                              k=15
+#                                              persistent=persistent_chain, # only for binary rbm
+#                                              k=15                         # >1 for binary rbm
                                               )
         # it is ok for a theano function to have no output
         # the purpose of train_rbm is solely to update the RBM parameters
@@ -464,6 +467,7 @@ class RBM(object):
                 self.momentum: momentum
             },
             name='train_rbm'
+# TODO: NanGuardMode should be selected with a flag
 #            ,mode=NanGuardMode(nan_is_error=True, inf_is_error=True, big_is_error=True)
         )
 
@@ -589,9 +593,10 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
     mnist = MNIST(datafile)
     raw_dataset = mnist.images
     n_data = raw_dataset.shape[0]
-    dataset = raw_dataset/255.0     # for binary rbm
-    dataset = mnist.normalize(raw_dataset) # for gaussian rbm
 
+    # TODO: the selection of the normalization should be done at runtime
+    dataset = raw_dataset/255.0     # for binary rbm
+#    dataset = mnist.normalize(raw_dataset) # for gaussian rbm
 
     train_set_x = theano.shared(dataset[0:n_data*5/6], borrow=True)
     test_set_x = theano.shared(dataset[n_data*5/6:n_data], borrow=True)
@@ -614,7 +619,7 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
     os.chdir(output_folder)
 
     # construct the RBM class
-    rbm = GRBM(input=x, n_visible=mnist.sizeX * mnist.sizeY,
+    rbm = RBM(input=x, n_visible=mnist.sizeX * mnist.sizeY,
               n_hidden=n_hidden, numpy_rng=rng, theano_rng=theano_rng)
 
     rbm.training(train_set_x,
@@ -690,5 +695,6 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
 
 if __name__ == '__main__':
 
-# For Gaussian RBM use a smaller learning rate, 0.01 is a starting point
-    test_rbm(learning_rate=0.01, training_epochs=15)
+# For Gaussian RBM use a smaller learning rate, 0.01 is a good starting point
+# TODO: Gaussian and Binary tests should be selected at run-time
+    test_rbm(learning_rate=0.1, training_epochs=15)
