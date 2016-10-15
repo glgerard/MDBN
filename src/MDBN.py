@@ -30,6 +30,9 @@ import timeit
 import sys
 import os
 
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+
 import numpy
 import theano
 from theano import tensor
@@ -40,6 +43,29 @@ from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 from utils import zscore
 from rbm import RBM
 from rbm import GRBM
+
+def get_minibatches_idx(n, batch_size, shuffle=False):
+    """
+    Used to shuffle the dataset at each iteration.
+    """
+
+    idx_list = numpy.arange(n, dtype="int32")
+
+    if shuffle:
+        numpy.random.shuffle(idx_list)
+
+    minibatches = []
+    minibatch_start = 0
+    for i in range(n // batch_size):
+        minibatches.append(idx_list[minibatch_start:
+        minibatch_start + batch_size])
+        minibatch_start += batch_size
+
+    if (minibatch_start != n):
+        # Make a minibatch out of what is left
+        minibatches.append(idx_list[minibatch_start:])
+
+    return range(len(minibatches)), minibatches
 
 class HiddenLayer(object):
     def __init__(self, rng, input, n_in, n_out, W=None, b=None,
@@ -244,6 +270,7 @@ class DBN(object):
     def inspect_outputs(self, i, node, fn):
         print(" output(s) value(s):", [output[0] for output in fn.outputs])
 
+
     def pretraining_functions(self, train_set_x, batch_size, k, monitor=False):
         '''Generates a list of functions, for performing one step of
         gradient descent at a given layer. The function will require
@@ -261,9 +288,14 @@ class DBN(object):
         '''
 
         # index to a [mini]batch
-        index = tensor.lscalar('index')  # index to a minibatch
+        indexes = tensor.lvector('indexes')  # index to a minibatch
         learning_rate = tensor.scalar('lr', dtype=theano.config.floatX)  # learning rate to use
         momentum = tensor.scalar('momentum', dtype=theano.config.floatX)
+        test_sample = tensor.vector('test_smaple', dtype=theano.config.floatX)
+
+        # TODO: deal with batch_size of 1
+
+        assert batch_size > 1
 
         pretrain_fns = []
         for rbm in self.rbm_layers:
@@ -271,25 +303,29 @@ class DBN(object):
             # get the cost and the updates list
             # using CD-k here (persisent=None) for training each RBM.
             # TODO: change cost function to reconstruction error
-            if self.gauss == True:
+            if isinstance(rbm, GRBM):
                 cost, updates = rbm.get_cost_updates(learning_rate,
                                                      lambda_2 = 0.1,
-                                                     batch_size=batch_size,
+                                                     batch_size=batch_size-1,
                                                      persistent=None, k=k)
             else:
                 cost, updates = rbm.get_cost_updates(learning_rate,
                                                      weightcost = 0.002,
-                                                     batch_size=batch_size,
+                                                     batch_size=batch_size-1,
                                                      persistent=None, k=k)
+
+            feg = rbm.free_energy_gap(test_sample)
 
             # compile the theano function
             if monitor:
                 fn = theano.function(
-                    inputs=[index, theano.In(learning_rate, value=0.1)],
-                    outputs=cost,
+                    inputs=[indexes, momentum, theano.In(learning_rate, value=0.1)],
+                    outputs=[cost, feg],
                     updates=updates,
                     givens={
-                        self.x: train_set_x[index * batch_size:(index+1)*batch_size]
+                        self.x: train_set_x[indexes[:-1]],  # leave one out
+                        rbm.momentum: momentum,
+                        test_sample: train_set_x[indexes[-1]]
                     }
                     , mode = theano.compile.MonitorMode(
                                  pre_func=self.inspect_inputs)
@@ -297,12 +333,13 @@ class DBN(object):
                 )
             else:
                 fn = theano.function(
-                    inputs=[index, momentum, theano.In(learning_rate, value=0.1)],
-                    outputs=cost,
+                    inputs=[indexes, momentum, theano.In(learning_rate, value=0.1)],
+                    outputs=[cost, feg],
                     updates=updates,
                     givens={
-                        self.x: train_set_x[index * batch_size:(index+1)*batch_size],
-                        self.momentum: momentum
+                        self.x: train_set_x[indexes[:-1]],
+                        rbm.momentum: momentum,
+                        test_sample: train_set_x[indexes[-1]]
                     }
                 )
             # append `fn` to the list of functions
@@ -310,7 +347,7 @@ class DBN(object):
 
         return pretrain_fns
 
-    def pretraining(self, train_set_x, n_train_batches, batch_size, k,
+    def pretraining(self, train_set_x, n, batch_size, k,
                     pretraining_epochs, pretrain_lr,
                     monitor=False):
         #########################
@@ -326,28 +363,46 @@ class DBN(object):
         print('... pre-training the model')
         start_time = timeit.default_timer()
         # Pre-train layer-wise
-        if self.gauss == False:
-            momentum = 0.6
-        else:
-            momentum = 0.0
+
         for i in range(self.n_layers):
+            if isinstance(self.rbm_layers[i], GRBM):
+                momentum = 0.0
+            else:
+                momentum = 0.6
             # go through pretraining epochs
+            mean_cost = []
+            free_energy = []
             for epoch in range(pretraining_epochs[i]):
+                _, minibatches = get_minibatches_idx(n,
+                                                    batch_size,
+                                                    shuffle=False)
                 # go through the training set
                 c = []
-                if self.gauss == False and epoch == 6:
+                frequency = pretraining_epochs[i]/40
+                if not isinstance(self.rbm_layers[i], GRBM) and epoch == 6:
                     momentum = 0.9
-                for batch_index in range(n_train_batches):
-                    c.append(pretraining_fns[i](index=batch_index,
+                for mb, minibatch in enumerate(minibatches):
+                    c.append(pretraining_fns[i](indexes=minibatch,
                                                 momentum=momentum,
                                                 lr=pretrain_lr[i]))
-                print('Pre-training layer %i, epoch %d, cost ' % (i, epoch), end=' ')
-                print(numpy.mean(c))
+                    if epoch % frequency == 0 and mb == 0:
+                        print('Free energy gap layer %i, epoch %d ' % (i, epoch), end=' ')
+                        print(c[-1][1])
+                        free_energy.append(c[-1][1])
+
+                if epoch % frequency == 0:
+                    print('Pre-training layer %i, epoch %d, cost ' % (i, epoch), end=' ')
+                    mean_cost.append(numpy.mean(c[0]))
+                    print(mean_cost[-1])
+
+            plt.plot(mean_cost)
+            plt.plot(free_energy)
 
         end_time = timeit.default_timer()
 
         print('The pretraining code for file ' + os.path.split(__file__)[1] +
               ' ran for %.2fm' % ((end_time - start_time) / 60.), file=sys.stderr)
+
 
     def output(self, dataset):
         fn = theano.function(inputs=[],
@@ -368,7 +423,9 @@ def importdata(file):
                        skiprows=1,
                        usecols=range(1,ncols)))
 
-def test_MDBN(batch_size=1,
+# batch_size changed from 1 as in M.Liang to 20
+
+def test(batch_size=20,
              n_chains=20, n_samples=10, output_folder='MDBN_plots'):
     """
 
@@ -400,7 +457,7 @@ def test_MDBN(batch_size=1,
     x = tensor.matrix('x')
 
     # compute number of minibatches for training, validation and testing
-    n_train_batches = datarna.get_value(borrow=True).shape[0] // batch_size
+    n_data = datarna.get_value(borrow=True).shape[0]
 
     rng = numpy.random.RandomState(123)
     theano_rng = RandomStreams(rng.randint(2 ** 30))
@@ -416,8 +473,8 @@ def test_MDBN(batch_size=1,
     rna_DBN = DBN(numpy_rng=rng, n_ins=datarna.get_value().shape[1],
               hidden_layers_sizes=[],
               n_outs=40)
-    rna_DBN.pretraining(datarna, n_train_batches, batch_size, k=1,
-                        pretraining_epochs=[8000],
+    rna_DBN.pretraining(datarna, n_data, batch_size, k=10,
+                        pretraining_epochs=[2000],
                         pretrain_lr=[0.0005])
 
     output_RNA = rna_DBN.output(datarna)
@@ -426,7 +483,7 @@ def test_MDBN(batch_size=1,
     ge_DBN = DBN(numpy_rng=rng, n_ins=datage.get_value().shape[1],
               hidden_layers_sizes=[400],
               n_outs=40)
-    ge_DBN.pretraining(datage, n_train_batches, batch_size, k=1,
+    ge_DBN.pretraining(datage, n_data, batch_size, k=1,
                        pretraining_epochs=[8000, 800],
                        pretrain_lr=[0.0005, 0.1])
 
@@ -436,7 +493,7 @@ def test_MDBN(batch_size=1,
     me_DBN = DBN(numpy_rng=rng, n_ins=datame.get_value().shape[1],
               hidden_layers_sizes=[400],
               n_outs=40)
-    me_DBN.pretraining(datame, n_train_batches, batch_size, k=1,
+    me_DBN.pretraining(datame, n_data, batch_size, k=1,
                        pretraining_epochs=[8000, 800],
                        pretrain_lr=[0.0005, 0.1])
 
@@ -451,7 +508,7 @@ def test_MDBN(batch_size=1,
                   gauss=False,
                   hidden_layers_sizes=[24],
                   n_outs=8)
-    top_DBN.pretraining(joint_data, n_train_batches, batch_size, k=1,
+    top_DBN.pretraining(joint_data, n_data, batch_size, k=1,
                         pretraining_epochs=[800, 800],
                         pretrain_lr=[0.1, 0.1])
 
@@ -472,5 +529,7 @@ def test_MDBN(batch_size=1,
              top_params=[{p.name: p.get_value()} for p in top_DBN.params]
              )
 
+    os.chdir('..')
+
 if __name__ == '__main__':
-    test_MDBN()
+    test()
