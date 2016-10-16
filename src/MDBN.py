@@ -425,7 +425,7 @@ def importdata(file):
 
 def test(datafiles,
          batch_size=20,
-         output_folder='MDBN_plots',
+         output_folder='MDBN_run',
          rng=None):
     """
     :param datafile: path to the dataset
@@ -439,9 +439,7 @@ def test(datafiles,
     #################################
     #     Training the RBM          #
     #################################
-    if not os.path.isdir(output_folder):
-        os.makedirs(output_folder)
-    os.chdir(output_folder)
+
 
     rna_DBN, output_RNA = train_RNA(datafiles['mRNA'])
 
@@ -464,6 +462,10 @@ def test(datafiles,
                         pretrain_lr=[0.1, 0.1])
 
     classes = top_DBN.output(joint_data)
+
+    if not os.path.isdir(output_folder):
+        os.makedirs(output_folder)
+    os.chdir(output_folder)
 
     numpy.savez('parameters_at_gaussian_layer_RNA.npz',
              k=20,
@@ -528,7 +530,7 @@ def train_ME(datafile, data_dir='../data'):
                               batch_size=20,
                               k=1,
                               layers_sizes=[400, 40],
-                              pretraining_epochs=[800, 800],
+                              pretraining_epochs=[8000, 800],
                               pretrain_lr=[0.0005, 0.1])
 
 def train_GE(datafile, data_dir='../data'):
@@ -540,7 +542,7 @@ def train_GE(datafile, data_dir='../data'):
                               batch_size=20,
                               k=1,
                               layers_sizes=[400, 40],
-                              pretraining_epochs=[1400, 800],
+                              pretraining_epochs=[8000, 800],
                               pretrain_lr=[0.0005, 0.1])
 
 def train_RNA(datafile, data_dir='../data'):
@@ -552,7 +554,7 @@ def train_RNA(datafile, data_dir='../data'):
               batch_size=10,
               k=10,
               layers_sizes=[40],
-              pretraining_epochs=[1200],
+              pretraining_epochs=[80000],
               pretrain_lr=[0.0005])
 
 def train_MNIST_Gaussian():
@@ -583,8 +585,8 @@ if __name__ == '__main__':
         'mRNA' : '3.miRNA_0.5.out'
     }
 
-#    test(datafiles)
+    test(datafiles)
 
 #    train_RNA(datafiles['mRNA'])
 
-    train_MNIST_Gaussian()
+#    train_MNIST_Gaussian()
