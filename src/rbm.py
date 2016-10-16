@@ -169,15 +169,14 @@ class RBM(object):
         hidden_term = tensor.sum(nnet.softplus(wx_b), axis=1)
         return -hidden_term - vbias_term
 
-    def free_energy_gap(self, v_sample):
+    def free_energy_gap(self, train, validation):
         """ Computes the free energy gap between train and test set, F(x_test) - F(x_train).
 
         See: Hinton, "A Practical Guide to Training Restricted Boltzmann Machines", UTML TR 2010-003, 2010, section 6.
 
         Originally from: https://github.com/wuaalb/keras_extensions/blob/master/keras_extensions/rbm.py
         """
-        return tensor.mean(self.free_energy(self.input)) \
-              - tensor.mean(self.free_energy(v_sample))
+        return tensor.mean(self.free_energy(train)) - tensor.mean(self.free_energy(validation))
 
     def propup(self, vis):
         '''This function propagates the visible units activation upwards to
@@ -746,4 +745,4 @@ def test(class_to_test=RBM,learning_rate=0.1, training_epochs=15,
     os.chdir('../')
 
 if __name__ == '__main__':
-    test(class_to_test=RBM, training_epochs=5)
+    test(class_to_test=GRBM, training_epochs=5)
