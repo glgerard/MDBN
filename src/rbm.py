@@ -671,6 +671,7 @@ def test(class_to_test=RBM,
     #################################
     if not os.path.isdir(output_folder):
         os.makedirs(output_folder)
+    root_dir = os.getcwd()
     os.chdir(output_folder)
 
     # construct the RBM class
@@ -746,7 +747,7 @@ def test(class_to_test=RBM,
     Y = mnist.display_samples(samples)
     scipy.misc.imsave('samples.png', Y)
 
-    os.chdir('../')
+    os.chdir(root_dir)
 
 if __name__ == '__main__':
     test(class_to_test=GRBM, training_epochs=5)

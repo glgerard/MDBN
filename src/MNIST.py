@@ -42,7 +42,7 @@ class MNIST(object):
         if not os.path.isdir(datadir):
             os.mkdir(datadir)
 
-        root_dir = os.curdir
+        root_dir = os.getcwd()
         os.chdir(datadir)
 
         # Read the images

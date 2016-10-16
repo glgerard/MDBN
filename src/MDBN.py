@@ -29,6 +29,8 @@ from __future__ import print_function, division
 import timeit
 import sys
 import os
+import zipfile
+import urllib
 
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -409,21 +411,10 @@ class DBN(object):
                              })
         return fn()
 
-def importdata(file):
-    with open(file) as f:
-        ncols = len(f.readline().split('\t'))
-
-    data = numpy.loadtxt(file,
-                       dtype=theano.config.floatX,
-                       delimiter='\t',
-                       skiprows=1,
-                       usecols=range(1,ncols))
-
-    return (data.shape[0], ncols-1, data)
-
 # batch_size changed from 1 as in M.Liang to 20
 
 def test(datafiles,
+         datadir='data',
          batch_size=20,
          output_folder='MDBN_run',
          rng=None):
@@ -441,11 +432,11 @@ def test(datafiles,
     #################################
 
 
-    rna_DBN, output_RNA = train_RNA(datafiles['mRNA'])
+    rna_DBN, output_RNA = train_RNA(datafiles['mRNA'], datadir)
 
-    ge_DBN, output_GE = train_GE(datafiles['GE'])
+    ge_DBN, output_GE = train_GE(datafiles['GE'], datadir)
 
-    me_DBN, output_ME = train_ME(datafiles['ME'])
+    me_DBN, output_ME = train_ME(datafiles['ME'], datadir)
 
     print('*** Training on joint layer ***')
 
@@ -484,13 +475,28 @@ def test(datafiles,
 
     os.chdir('..')
 
-def load_n_preprocess_data(datafile):
+def importdata(file, datadir):
+    root_dir = os.curdir
+    os.chdir(datadir)
+    with open(file) as f:
+        ncols = len(f.readline().split('\t'))
+
+    data = numpy.loadtxt(file,
+                       dtype=theano.config.floatX,
+                       delimiter='\t',
+                       skiprows=1,
+                       usecols=range(1,ncols))
+
+    os.chdir(root_dir)
+    return (data.shape[0], ncols-1, data)
+
+def load_n_preprocess_data(datafile, datadir='data'):
     # Load the data, each column is a single person
     # Pass to a row representation, i.e. the data for each person is now on a
     # single row.
     # Normalize the data so that each measurement on our population has zero
     # mean and zero variance
-    _, _, data = importdata(datafile)
+    _, _, data = importdata(datafile, datadir)
     data = zscore(data)
     train_set = theano.shared(data[:data.shape[0] * 0.9], borrow=True)
     validation_set = theano.shared(data[data.shape[0] * 0.9:], borrow=True)
@@ -521,10 +527,10 @@ def train_bottom_layer(train_set, validation_set,
     output = dbn.output(train_set)
     return dbn, output
 
-def train_ME(datafile, data_dir='../data'):
+def train_ME(datafile, datadir='data'):
     print('*** Training on ME ***')
 
-    train_set, validation_set = load_n_preprocess_data(data_dir + '/' + datafile)
+    train_set, validation_set = load_n_preprocess_data(datafile, datadir)
 
     return train_bottom_layer(train_set, validation_set,
                               batch_size=20,
@@ -533,10 +539,10 @@ def train_ME(datafile, data_dir='../data'):
                               pretraining_epochs=[8000, 800],
                               pretrain_lr=[0.0005, 0.1])
 
-def train_GE(datafile, data_dir='../data'):
+def train_GE(datafile, datadir='data'):
     print('*** Training on GE ***')
 
-    train_set, validation_set = load_n_preprocess_data(data_dir + '/' + datafile)
+    train_set, validation_set = load_n_preprocess_data(datafile, datadir)
 
     return train_bottom_layer(train_set, validation_set,
                               batch_size=20,
@@ -545,10 +551,10 @@ def train_GE(datafile, data_dir='../data'):
                               pretraining_epochs=[8000, 800],
                               pretrain_lr=[0.0005, 0.1])
 
-def train_RNA(datafile, data_dir='../data'):
+def train_RNA(datafile, datadir='data'):
     print('*** Training on RNA ***')
 
-    train_set, validation_set = load_n_preprocess_data(data_dir + '/' + datafile)
+    train_set, validation_set = load_n_preprocess_data(datafile, datadir)
 
     return train_bottom_layer(train_set, validation_set,
               batch_size=10,
@@ -559,7 +565,7 @@ def train_RNA(datafile, data_dir='../data'):
 
 def train_MNIST_Gaussian():
     # Load the data
-    mnist = MNIST('../data/train-images-idx3-ubyte')
+    mnist = MNIST()
     raw_dataset = mnist.images
     n_data = raw_dataset.shape[0]
 
@@ -577,16 +583,32 @@ def train_MNIST_Gaussian():
                           pretraining_epochs=[5],
                           pretrain_lr=[0.01])
 
-if __name__ == '__main__':
 
+def prepare_datafiles(datadir='data'):
+    base_url = 'http://nar.oxfordjournals.org/content/suppl/2012/07/25/gks725.DC1/'
+    archive = 'nar-00961-n-2012-File005.zip'
     datafiles = {
-        'GE': '3.GE1_0.5.out',
-        'ME': '3.Methylation_0.5.out',
-        'mRNA' : '3.miRNA_0.5.out'
+        'GE': 'TCGA_Data/3.GE1_0.5.out',
+        'ME': 'TCGA_Data/3.Methylation_0.5.out',
+        'mRNA': 'TCGA_Data/3.miRNA_0.5.out'
     }
+    if not os.path.isdir(datadir):
+        os.mkdir(datadir)
+    root_dir = os.getcwd()
+    os.chdir(datadir)
+    for name, datafile in datafiles.iteritems():
+        if not os.path.isfile(datafile):
+            if not os.path.isfile(archive):
+                print('Downloading TCGA_Data from ' + base_url)
+                testfile = urllib.URLopener()
+                testfile.retrieve(base_url + archive, archive)
+            zipfile.ZipFile(archive, 'r').extract(datafile)
+    os.chdir(root_dir)
+    return datafiles
 
-    test(datafiles)
+if __name__ == '__main__':
+    test(prepare_datafiles())
 
-#    train_RNA(datafiles['mRNA'])
+#    train_RNA(datafiles['mRNA'], datadir)
 
 #    train_MNIST_Gaussian()
