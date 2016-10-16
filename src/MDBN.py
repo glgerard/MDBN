@@ -114,13 +114,21 @@ class HiddenLayer(object):
         self.W = W
         self.b = b
 
-        lin_output = tensor.dot(input, self.W) + self.b
-        self.output = (
-            lin_output if activation is None
-            else activation(lin_output)
-        )
+        self.activation = activation
+
         # parameters of the model
         self.params = [self.W, self.b]
+
+    def output(self, input=None):
+        if input is None:
+            input = self.input
+        lin_output = tensor.dot(input, self.W) + self.b
+        result = (
+            lin_output if self.activation is None
+            else self.activation(lin_output)
+        )
+        return result
+
 
 class DBN(object):
     """Deep Belief Network
@@ -205,8 +213,10 @@ class DBN(object):
                 else:
                     layer_input = input
             else:
-                layer_input = self.sigmoid_layers[-1].output
+                layer_input = self.sigmoid_layers[-1].output()
 
+            print('Adding a layer with %i input and %i outputs' %
+                  (input_size, stacked_layers_sizes[i]))
             sigmoid_layer = HiddenLayer(rng=numpy_rng,
                                         input=layer_input,
                                         n_in=input_size,
@@ -278,7 +288,7 @@ class DBN(object):
 
         pretrain_fns = []
         overfit_monitor_fns = []
-        for rbm in self.rbm_layers:
+        for i, rbm in enumerate(self.rbm_layers):
             # get the cost and the updates list
             # using CD-k here (persisent=None) for training each RBM.
             # TODO: change cost function to reconstruction error
@@ -319,15 +329,28 @@ class DBN(object):
 
             feg = rbm.free_energy_gap(train_sample, validation_sample)
 
-            fn = theano.function(
-                inputs=[indexes],
-                outputs=feg,
-                givens={
-                    train_sample: train_set_x[indexes],
-                    validation_sample: validation_set_x
-                },
-                mode=mode
-            )
+            if i == 0:
+                fn = theano.function(
+                    inputs=[indexes],
+                    outputs=feg,
+                    givens={
+                        train_sample: train_set_x[indexes],
+                        validation_sample: validation_set_x
+                    },
+                    mode=mode
+                )
+            else:
+                t_sample = self.sigmoid_layers[i-1].output(train_set_x)
+                v_sample = self.sigmoid_layers[i-1].output(validation_set_x)
+                fn = theano.function(
+                    inputs=[indexes],
+                    outputs=feg,
+                    givens={
+                        train_sample: t_sample[indexes],
+                        validation_sample: v_sample
+                    },
+                    mode=mode
+                )
 
             overfit_monitor_fns.append(fn)
 
@@ -405,11 +428,11 @@ class DBN(object):
 
     def output(self, dataset):
         fn = theano.function(inputs=[],
-                             outputs=self.sigmoid_layers[-1].output,
+                             outputs=self.sigmoid_layers[-1].output(),
                              givens={
                                  self.x: dataset
                              })
-        return fn()
+        return fn
 
 # batch_size changed from 1 as in M.Liang to 20
 
@@ -452,7 +475,7 @@ def test(datafiles,
                         pretraining_epochs=[800, 800],
                         pretrain_lr=[0.1, 0.1])
 
-    classes = top_DBN.output(joint_data)
+    classes = top_DBN.output(joint_data, range(joint_data.get_value().shape[0]))
 
     if not os.path.isdir(output_folder):
         os.makedirs(output_folder)
@@ -488,7 +511,7 @@ def importdata(file, datadir):
                        usecols=range(1,ncols))
 
     os.chdir(root_dir)
-    return (data.shape[0], ncols-1, data)
+    return (data.shape[1], ncols-1, data)
 
 def load_n_preprocess_data(datafile, datadir='data'):
     # Load the data, each column is a single person
@@ -497,7 +520,7 @@ def load_n_preprocess_data(datafile, datadir='data'):
     # Normalize the data so that each measurement on our population has zero
     # mean and zero variance
     _, _, data = importdata(datafile, datadir)
-    data = zscore(data)
+    data = zscore(data.T)
     train_set = theano.shared(data[:data.shape[0] * 0.9], borrow=True)
     validation_set = theano.shared(data[data.shape[0] * 0.9:], borrow=True)
     return train_set, validation_set
@@ -548,7 +571,7 @@ def train_GE(datafile, datadir='data'):
                               batch_size=20,
                               k=1,
                               layers_sizes=[400, 40],
-                              pretraining_epochs=[8000, 800],
+                              pretraining_epochs=[2, 2],
                               pretrain_lr=[0.0005, 0.1])
 
 def train_RNA(datafile, datadir='data'):
@@ -607,8 +630,10 @@ def prepare_datafiles(datadir='data'):
     return datafiles
 
 if __name__ == '__main__':
-    test(prepare_datafiles())
+    datafiles = prepare_datafiles()
+#    test(datafiles)
 
-#    train_RNA(datafiles['mRNA'], datadir)
+#    train_RNA(datafiles['mRNA'])
+    train_GE(datafiles['GE'])
 
 #    train_MNIST_Gaussian()
