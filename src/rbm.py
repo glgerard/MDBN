@@ -615,10 +615,14 @@ class GRBM(RBM):
                    cost, updates,
                    display_fn)
 
-def test(class_to_test=RBM,learning_rate=0.1, training_epochs=15,
-             datafile='../data/train-images-idx3-ubyte', batch_size=20,
-             n_chains=20, n_samples=10, output_folder='rbm_plots',
-             n_hidden=500):
+def test(class_to_test=RBM,
+         learning_rate=0.1,
+         training_epochs=15,
+         batch_size=20,
+         n_chains=20,
+         n_samples=10,
+         output_folder='rbm_plots',
+         n_hidden=500):
     """
     Demonstrate how to train and afterwards sample from it using Theano.
 
@@ -638,7 +642,7 @@ def test(class_to_test=RBM,learning_rate=0.1, training_epochs=15,
 
     """
     # Load the data
-    mnist = MNIST(datafile)
+    mnist = MNIST()
     raw_dataset = mnist.images
     n_data = raw_dataset.shape[0]
 
