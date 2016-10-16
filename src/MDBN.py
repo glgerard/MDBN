@@ -247,7 +247,8 @@ class DBN(object):
         print(" output(s) value(s):", [output[0] for output in fn.outputs])
 
 
-    def pretraining_functions(self, train_set_x, batch_size, k, monitor=False):
+    def pretraining_functions(self, train_set_x, validation_set_x,
+                              batch_size, k, monitor=False):
         '''Generates a list of functions, for performing one step of
         gradient descent at a given layer. The function will require
         as input the minibatch index, and to train an RBM you just
@@ -267,27 +268,25 @@ class DBN(object):
         indexes = tensor.lvector('indexes')  # index to a minibatch
         learning_rate = tensor.scalar('lr', dtype=theano.config.floatX)  # learning rate to use
         momentum = tensor.scalar('momentum', dtype=theano.config.floatX)
-        test_sample = tensor.vector('test_smaple', dtype=theano.config.floatX)
+        test_sample = tensor.matrix('test_smaple', dtype=theano.config.floatX)
 
         # TODO: deal with batch_size of 1
-
         assert batch_size > 1
 
         pretrain_fns = []
         for rbm in self.rbm_layers:
-
             # get the cost and the updates list
             # using CD-k here (persisent=None) for training each RBM.
             # TODO: change cost function to reconstruction error
             if isinstance(rbm, GRBM):
                 cost, updates = rbm.get_cost_updates(learning_rate,
                                                      lambda_2 = 0.1,
-                                                     batch_size=batch_size-1,
+                                                     batch_size=batch_size,
                                                      persistent=None, k=k)
             else:
                 cost, updates = rbm.get_cost_updates(learning_rate,
                                                      weightcost = 0.002,
-                                                     batch_size=batch_size-1,
+                                                     batch_size=batch_size,
                                                      persistent=None, k=k)
 
             feg = rbm.free_energy_gap(test_sample)
@@ -299,13 +298,13 @@ class DBN(object):
                 mode = theano.config.mode
 
             fn = theano.function(
-                inputs=[indexes, momentum, theano.In(learning_rate, value=0.1)],
+                inputs=[indexes, momentum, theano.In(learning_rate)],
                 outputs=[cost, feg],
                 updates=updates,
                 givens={
-                        self.x: train_set_x[indexes[:-1]],  # leave one out
+                        self.x: train_set_x[indexes],
                         rbm.momentum: momentum,
-                        test_sample: train_set_x[indexes[-1]]
+                        test_sample: validation_set_x
                 },
                 mode = mode
     #           mode=NanGuardMode(nan_is_error=True, inf_is_error=True, big_is_error=True)
@@ -316,7 +315,8 @@ class DBN(object):
 
         return pretrain_fns
 
-    def pretraining(self, train_set_x, n, batch_size, k,
+    def pretraining(self, train_set_x, validation_set_x,
+                    batch_size, k,
                     pretraining_epochs, pretrain_lr,
                     monitor=False):
         #########################
@@ -325,13 +325,16 @@ class DBN(object):
 
         print('... getting the pretraining functions')
         pretraining_fns = self.pretraining_functions(train_set_x=train_set_x,
-                                                    batch_size=batch_size,
-                                                    k=k,
-                                                    monitor=monitor)
+                                                     validation_set_x=validation_set_x,
+                                                     batch_size=batch_size,
+                                                     k=k,
+                                                     monitor=monitor)
 
         print('... pre-training the model')
         start_time = timeit.default_timer()
         # Pre-train layer-wise
+
+        n_data = train_set_x.get_value().shape[0]
 
         for i in range(self.n_layers):
             if isinstance(self.rbm_layers[i], GRBM):
@@ -342,9 +345,9 @@ class DBN(object):
             mean_cost = []
             free_energy = []
             for epoch in range(pretraining_epochs[i]):
-                _, minibatches = get_minibatches_idx(n,
+                _, minibatches = get_minibatches_idx(n_data,
                                                     batch_size,
-                                                    shuffle=False)
+                                                    shuffle=True)
                 # go through the training set
                 c = []
                 frequency = pretraining_epochs[i]/40
@@ -385,51 +388,28 @@ def importdata(file):
     with open(file) as f:
         ncols = len(f.readline().split('\t'))
 
-    return (ncols-1,
-            numpy.loadtxt(file,
+    data = numpy.loadtxt(file,
                        dtype=theano.config.floatX,
                        delimiter='\t',
                        skiprows=1,
-                       usecols=range(1,ncols)))
+                       usecols=range(1,ncols))
+
+    return (data.shape[0], ncols-1, data)
 
 # batch_size changed from 1 as in M.Liang to 20
 
-def test(batch_size=20,
-             n_chains=20, n_samples=10, output_folder='MDBN_plots'):
+def test(datafiles,
+         batch_size=20,
+         output_folder='MDBN_plots',
+         rng=None):
     """
-
     :param datafile: path to the dataset
 
     :param batch_size: size of a batch used to train the RBM
-
-    :param n_chains: number of parallel Gibbs chains to be used for sampling
-
-    :param n_samples: number of samples to plot for each chain
-
     """
 
-    # Load the data, each column is a single person
-    gecols, GE = importdata("../data/3.GE1_0.5.out")
-    mecols, ME  = importdata("../data/3.Methylation_0.5.out")
-    rnacols, mRNA  = importdata("../data/3.miRNA_0.5.out")
-    # Pass to a row representation, i.e. the data for each person is now on a
-    # single row.
-    # Normalize the data so that each measurement on our population has zero
-    # mean and zero variance
-    normGE = zscore(GE.T)
-    normME = zscore(ME.T)
-    normRNA = zscore(mRNA.T)
-    datage = theano.shared(normGE,borrow=True)
-    datame = theano.shared(normME,borrow=True)
-    datarna = theano.shared(normRNA,borrow=True)
-
-    x = tensor.matrix('x')
-
-    # compute number of minibatches for training, validation and testing
-    n_data = datarna.get_value(borrow=True).shape[0]
-
-    rng = numpy.random.RandomState(123)
-    theano_rng = RandomStreams(rng.randint(2 ** 30))
+    if rng is None:
+        rng = numpy.random.RandomState(123)
 
     #################################
     #     Training the RBM          #
@@ -438,35 +418,11 @@ def test(batch_size=20,
         os.makedirs(output_folder)
     os.chdir(output_folder)
 
-    print('*** Training on RNA ***')
-    rna_DBN = DBN(numpy_rng=rng, n_ins=datarna.get_value().shape[1],
-              hidden_layers_sizes=[],
-              n_outs=40)
-    rna_DBN.pretraining(datarna, n_data, batch_size, k=10,
-                        pretraining_epochs=[1200],
-                        pretrain_lr=[0.0005])
+    rna_DBN, output_RNA = train_RNA(datafiles['mRNA'])
 
-    output_RNA = rna_DBN.output(datarna)
+    ge_DBN, output_GE = train_GE(datafiles['GE'])
 
-    print('*** Training on GE ***')
-    ge_DBN = DBN(numpy_rng=rng, n_ins=datage.get_value().shape[1],
-              hidden_layers_sizes=[400],
-              n_outs=40)
-    ge_DBN.pretraining(datage, n_data, batch_size, k=1,
-                       pretraining_epochs=[1400, 800],
-                       pretrain_lr=[0.0005, 0.1])
-
-    output_GE = ge_DBN.output(datage)
-
-    print('*** Training on ME ***')
-    me_DBN = DBN(numpy_rng=rng, n_ins=datame.get_value().shape[1],
-              hidden_layers_sizes=[400],
-              n_outs=40)
-    me_DBN.pretraining(datame, n_data, batch_size, k=1,
-                       pretraining_epochs=[800, 800],
-                       pretrain_lr=[0.0005, 0.1])
-
-    output_ME = me_DBN.output(datame)
+    me_DBN, output_ME = train_ME(datafiles['ME'])
 
     print('*** Training on joint layer ***')
 
@@ -477,7 +433,8 @@ def test(batch_size=20,
                   gauss=False,
                   hidden_layers_sizes=[24],
                   n_outs=8)
-    top_DBN.pretraining(joint_data, n_data, batch_size, k=1,
+    top_DBN.pretraining(joint_data, joint_data.get_value().shape[0],
+                        batch_size, k=1,
                         pretraining_epochs=[800, 800],
                         pretrain_lr=[0.1, 0.1])
 
@@ -500,5 +457,81 @@ def test(batch_size=20,
 
     os.chdir('..')
 
+def load_n_preprocess_data(datafile):
+    # Load the data, each column is a single person
+    # Pass to a row representation, i.e. the data for each person is now on a
+    # single row.
+    # Normalize the data so that each measurement on our population has zero
+    # mean and zero variance
+    _, _, data = importdata(datafile)
+    data = zscore(data)
+    train_set = theano.shared(data[:data.shape[0] * 0.9], borrow=True)
+    validation_set = theano.shared(data[data.shape[0] * 0.9:], borrow=True)
+    return train_set, validation_set
+
+def train_bottom_layer(datafile, batch_size=20,
+                        k=1, layers_sizes=[40],
+                        pretraining_epochs=[800],
+                        pretrain_lr=[0.0005],
+                        rng=None,
+                        data_dir='../data'
+                      ):
+    train_set, validation_set = load_n_preprocess_data(data_dir + '/' + datafile)
+
+    if rng is None:
+        rng = numpy.random.RandomState(123)
+
+    dbn = DBN(numpy_rng=rng, n_ins=train_set.get_value().shape[1],
+                  hidden_layers_sizes=layers_sizes[1:],
+                  n_outs=layers_sizes[0])
+    dbn.pretraining(train_set,
+                        validation_set,
+                        batch_size, k=k,
+                        pretraining_epochs=pretraining_epochs,
+                        pretrain_lr=pretrain_lr)
+    output = dbn.output(train_set)
+    return dbn, output
+
+def train_ME(datafile):
+    print('*** Training on ME ***')
+
+    return train_bottom_layer(datafile,
+                              batch_size=20,
+                              k=1,
+                              layers_sizes=[400, 40],
+                              pretraining_epochs=[800, 800],
+                              pretrain_lr=[0.0005, 0.1])
+
+def train_GE(datafile):
+    print('*** Training on GE ***')
+
+    return train_bottom_layer(datafile,
+                              batch_size=20,
+                              k=1,
+                              layers_sizes=[400, 40],
+                              pretraining_epochs=[1400, 800],
+                              pretrain_lr=[0.0005, 0.1])
+
+def train_RNA(datafile):
+    print('*** Training on RNA ***')
+
+    return train_bottom_layer(datafile,
+              batch_size=10,
+              k=10,
+              layers_sizes=[40],
+              pretraining_epochs=[1200],
+              pretrain_lr=[0.0005])
+
 if __name__ == '__main__':
-    test()
+
+    datafiles = {
+        'GE': '3.GE1_0.5.out',
+        'ME': '3.Methylation_0.5.out',
+        'mRNA' : '3.miRNA_0.5.out'
+    }
+
+#    test(datafiles)
+
+    train_RNA(datafiles['mRNA'])
+
+

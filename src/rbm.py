@@ -176,8 +176,8 @@ class RBM(object):
 
         Originally from: https://github.com/wuaalb/keras_extensions/blob/master/keras_extensions/rbm.py
         """
-        return tensor.mean(self.free_energy(self.input))
-#              - tensor.mean(self.free_energy(v_sample))
+        return tensor.mean(self.free_energy(self.input)) \
+              - tensor.mean(self.free_energy(v_sample))
 
     def propup(self, vis):
         '''This function propagates the visible units activation upwards to
