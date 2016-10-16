@@ -633,10 +633,10 @@ def prepare_datafiles(datadir='data'):
     return datafiles
 
 if __name__ == '__main__':
-#    datafiles = prepare_datafiles()
+    datafiles = prepare_datafiles()
 #    test(datafiles)
 
 #    train_RNA(datafiles['mRNA'])
-#    train_GE(datafiles['GE'])
+    train_GE(datafiles['GE'])
 
-    train_MNIST_Gaussian()
+#    train_MNIST_Gaussian()
