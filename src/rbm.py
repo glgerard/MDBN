@@ -464,7 +464,8 @@ class RBM(object):
                    cost, updates,
                    display_fn)
 
-    def learn_model(self, train_set_x, training_epochs, batch_size,
+    def learn_model(self, train_set_x, validation_set_x,
+                    training_epochs, batch_size,
                     initial_momentum, final_momentum,
                     cost, updates,
                     display_fn):
@@ -485,6 +486,20 @@ class RBM(object):
             name='train_rbm'
 # TODO: NanGuardMode should be selected with a flag
 #            ,mode=NanGuardMode(nan_is_error=True, inf_is_error=True, big_is_error=True)
+        )
+
+        train_sample = tensor.matrix('train_smaple', dtype=theano.config.floatX)
+        validation_sample = tensor.matrix('validation_smaple', dtype=theano.config.floatX)
+
+        feg = self.free_energy_gap(train_sample, validation_sample)
+
+        feg_rbm = theano.function(
+            [indexes],
+            outputs=feg,
+            givens={
+                train_sample: train_set_x[indexes],
+                validation_sample: validation_set_x
+            }
         )
 
         # compute number of minibatches for training, validation and testing
@@ -510,7 +525,10 @@ class RBM(object):
             for batch_indexes in minibatches:
                 mean_cost += [train_rbm(batch_indexes, momentum)]
 
+            feg = feg_rbm(range(39))
+
             print('Training epoch %d, cost is ' % epoch, numpy.mean(mean_cost))
+            print('Free energy gap is ', feg)
 
             # Plot filters after each training epoch
             plotting_start = timeit.default_timer()
@@ -597,7 +615,8 @@ class GRBM(RBM):
 
         return error
 
-    def training(self, train_set_x, training_epochs, batch_size=10,
+    def training(self, train_set_x, validation_set_x,
+                 training_epochs, batch_size=10,
                  learning_rate=0.01, k=1,
                  initial_momentum = 0.0, final_momentum = 0.0,
                  weightcost = 0.0, display_fn=None,
@@ -610,7 +629,8 @@ class GRBM(RBM):
                                               batch_size=batch_size
                                               )
 
-        self.learn_model(train_set_x, training_epochs, batch_size,
+        self.learn_model(train_set_x, validation_set_x,
+                         training_epochs, batch_size,
                    initial_momentum, final_momentum,
                    cost, updates,
                    display_fn)
@@ -653,8 +673,11 @@ def test(class_to_test=RBM,
     else:
         dataset = raw_dataset/255
 
-    train_set_x = theano.shared(dataset[0:n_data*5/6], borrow=True)
-    test_set_x = theano.shared(dataset[n_data*5/6:n_data], borrow=True)
+    validation_set_size = 39
+
+    train_set_x = theano.shared(dataset[0:int(n_data*5/6)-validation_set_size], borrow=True)
+    validation_set_x = theano.shared(dataset[int(n_data*5/6)-validation_set_size:int(n_data*5/6)])
+    test_set_x = theano.shared(dataset[int(n_data*5/6):n_data], borrow=True)
 
     # find out the number of test samples
     number_of_test_samples = test_set_x.get_value(borrow=True).shape[0]
@@ -679,6 +702,7 @@ def test(class_to_test=RBM,
               n_hidden=n_hidden, numpy_rng=rng, theano_rng=theano_rng)
 
     rbm.training(train_set_x,
+                 validation_set_x,
                  training_epochs,
                  batch_size,
                  learning_rate,

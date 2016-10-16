@@ -365,6 +365,9 @@ class DBN(object):
         #########################
 
         print('... getting the pretraining functions')
+        print('Training set sample size %i' % train_set_x.get_value().shape[0])
+        print('Validation set sample size %i' % validation_set_x.get_value().shape[0])
+
         pretraining_fns, overfitting_monitor_fns = self.pretraining_functions(train_set_x=train_set_x,
                                                      validation_set_x=validation_set_x,
                                                      batch_size=batch_size,
@@ -402,12 +405,12 @@ class DBN(object):
                     momentum = 0.9
 
                 for mb, minibatch in enumerate(minibatches):
-                    c.append(pretraining_fns[i](indexes=minibatch,
+                    c.append(pretraining_fns[i](indexes=range(39),
                                                 momentum=momentum,
                                                 lr=pretrain_lr[i]))
 
                     if mb == 0:
-                        f.append(overfitting_monitor_fns[i](indexes=range(40)))
+                        f.append(overfitting_monitor_fns[i](indexes=minibatch))
 
                 if epoch % print_frequency == 0:
                     print('Free energy gap (layer %i, epoch %i): ' % (i, epoch), end=' ')
@@ -499,7 +502,7 @@ def test(datafiles,
     os.chdir('..')
 
 def importdata(file, datadir):
-    root_dir = os.curdir
+    root_dir = os.getcwd()
     os.chdir(datadir)
     with open(file) as f:
         ncols = len(f.readline().split('\t'))
@@ -521,8 +524,8 @@ def load_n_preprocess_data(datafile, datadir='data'):
     # mean and zero variance
     _, _, data = importdata(datafile, datadir)
     data = zscore(data.T)
-    train_set = theano.shared(data[:data.shape[0] * 0.9], borrow=True)
-    validation_set = theano.shared(data[data.shape[0] * 0.9:], borrow=True)
+    train_set = theano.shared(data[:int(data.shape[0] * 0.9)], borrow=True)
+    validation_set = theano.shared(data[int(data.shape[0] * 0.9):], borrow=True)
     return train_set, validation_set
 
 def train_bottom_layer(train_set, validation_set,
@@ -571,7 +574,7 @@ def train_GE(datafile, datadir='data'):
                               batch_size=20,
                               k=1,
                               layers_sizes=[400, 40],
-                              pretraining_epochs=[2, 2],
+                              pretraining_epochs=[8000, 800],
                               pretrain_lr=[0.0005, 0.1])
 
 def train_RNA(datafile, datadir='data'):
@@ -583,7 +586,7 @@ def train_RNA(datafile, datadir='data'):
               batch_size=10,
               k=10,
               layers_sizes=[40],
-              pretraining_epochs=[80000],
+              pretraining_epochs=[1600],
               pretrain_lr=[0.0005])
 
 def train_MNIST_Gaussian():
@@ -594,12 +597,12 @@ def train_MNIST_Gaussian():
 
     dataset = mnist.normalize(raw_dataset)
 
-    train_set = theano.shared(dataset[0:n_data*5/6], borrow=True)
-    validation_set = theano.shared(dataset[n_data*5/6:n_data], borrow=True)
+    train_set = theano.shared(dataset[0:int(n_data*5/6)], borrow=True)
+    validation_set = theano.shared(dataset[-39:], borrow=True)
 
     print('*** Training on MNIST ***')
 
-    return train_bottom_layer(train_set, validation_set[:40],
+    return train_bottom_layer(train_set, validation_set,
                           batch_size=20,
                           k=1,
                           layers_sizes=[500],
@@ -630,10 +633,10 @@ def prepare_datafiles(datadir='data'):
     return datafiles
 
 if __name__ == '__main__':
-    datafiles = prepare_datafiles()
+#    datafiles = prepare_datafiles()
 #    test(datafiles)
 
 #    train_RNA(datafiles['mRNA'])
-    train_GE(datafiles['GE'])
+#    train_GE(datafiles['GE'])
 
-#    train_MNIST_Gaussian()
+    train_MNIST_Gaussian()
