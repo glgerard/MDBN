@@ -24,6 +24,8 @@ Copyright (c) 2010--2015, Deep Learning Tutorials Development Team
 All rights reserved.
 """
 
+from __future__ import print_function, division
+
 import timeit
 import os
 
@@ -38,7 +40,7 @@ from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 
 import scipy.misc
 from MNIST import MNIST
-from utils import zscore
+from utils import get_minibatches_idx
 
 class RBM(object):
     """Restricted Boltzmann Machine (RBM)  """
@@ -104,7 +106,6 @@ class RBM(object):
             )
             # theano shared variables for weights and biases
             W = theano.shared(value=initial_W, name='W', borrow=True)
-            Wt = theano.shared(value=initial_W.T, name='Wt', borrow=True)
 
         if hbias is None:
             # create shared variable for hidden units bias
@@ -134,7 +135,7 @@ class RBM(object):
             self.input = tensor.matrix('input')
 
         self.W = W
-        self.Wt = Wt
+        self.Wt = W.T
         self.hbias = hbias
         self.vbias = vbias
         self.theano_rng = theano_rng
@@ -168,14 +169,15 @@ class RBM(object):
         hidden_term = tensor.sum(nnet.softplus(wx_b), axis=1)
         return -hidden_term - vbias_term
 
-    def free_energy_gap(self, x_train, x_test):
+    def free_energy_gap(self, v_sample):
         """ Computes the free energy gap between train and test set, F(x_test) - F(x_train).
 
         See: Hinton, "A Practical Guide to Training Restricted Boltzmann Machines", UTML TR 2010-003, 2010, section 6.
 
         Originally from: https://github.com/wuaalb/keras_extensions/blob/master/keras_extensions/rbm.py
         """
-        return tensor.mean(self.free_energy(x_train)) - tensor.mean(self.free_energy(x_test))
+        return tensor.mean(self.free_energy(self.input))
+#              - tensor.mean(self.free_energy(v_sample))
 
     def propup(self, vis):
         '''This function propagates the visible units activation upwards to
@@ -434,36 +436,51 @@ class RBM(object):
 
         return cross_entropy
 
-    # TODO: Gaussian Class should have a dedicated training (with lambda_2)
-    def training(self, train_set_x, training_epochs, batch_size, learning_rate,
+    def training(self, train_set_x, training_epochs, batch_size=10,
+                 learning_rate=0.1, k=1,
                  initial_momentum = 0.0, final_momentum = 0.0,
-                 weightcost = 0.0, display_fn=None):
-        # allocate symbolic variables for the data
-        index = tensor.lscalar()  # index to a [mini]batch
-        momentum = tensor.scalar('momentum', dtype=theano.config.floatX)
-        # initialize storage for the persistent chain (state = hidden
-        # layer of chain)
-        persistent_chain = theano.shared(numpy.zeros((batch_size, self.n_hidden),
-                                                     dtype=theano.config.floatX),
-                                         borrow=True)
+                 weightcost = 0.0, display_fn=None,
+                 persistent=True):
+
+        if persistent:
+            # initialize storage for the persistent chain (state = hidden
+            # layer of chain)
+            persistent_chain = theano.shared(numpy.zeros((batch_size, self.n_hidden),
+                                                         dtype=theano.config.floatX),
+                                             borrow=True)
+        else:
+            persistent_chain = None
 
         # get the cost and the gradient corresponding to one step of CD-15
 
         cost, updates = self.get_cost_updates(lr=learning_rate,
-#                                              lambda_2=0.1,                # only for gaussian rbm
-                                              batch_size=batch_size,
+                                              k=k,
                                               weightcost=weightcost,
-#                                              persistent=persistent_chain, # only for binary rbm
-#                                              k=15                         # >1 for binary rbm
+                                              batch_size=batch_size,
+                                              persistent=persistent_chain
                                               )
+
+        self.learn_model(train_set_x, training_epochs, batch_size,
+                   initial_momentum, final_momentum,
+                   cost, updates,
+                   display_fn)
+
+    def learn_model(self, train_set_x, training_epochs, batch_size,
+                    initial_momentum, final_momentum,
+                    cost, updates,
+                    display_fn):
+        # allocate symbolic variables for the data
+        indexes = tensor.lvector('indexes')  # index to a [mini]batch
+        momentum = tensor.scalar('momentum', dtype=theano.config.floatX)
+
         # it is ok for a theano function to have no output
         # the purpose of train_rbm is solely to update the RBM parameters
         train_rbm = theano.function(
-            [index, momentum],
+            [indexes, momentum],
             cost,
             updates=updates,
             givens={
-                self.input: train_set_x[index * batch_size: (index + 1) * batch_size],
+                self.input: train_set_x[indexes],
                 self.momentum: momentum
             },
             name='train_rbm'
@@ -472,7 +489,7 @@ class RBM(object):
         )
 
         # compute number of minibatches for training, validation and testing
-        n_train_batches = train_set_x.get_value(borrow=True).shape[0] // batch_size
+        n_train_data = train_set_x.get_value(borrow=True).shape[0]
 
         plotting_time = 0.
         start_time = timeit.default_timer()
@@ -484,11 +501,15 @@ class RBM(object):
             if epoch == 6:
                 momentum = final_momentum
 
+            _, minibatches = get_minibatches_idx(n_train_data,
+                                                 batch_size,
+                                                 shuffle=True)
+
             # go through the training set
             mean_cost = []
 
-            for batch_index in range(n_train_batches):
-                mean_cost += [train_rbm(batch_index, momentum)]
+            for batch_indexes in minibatches:
+                mean_cost += [train_rbm(batch_indexes, momentum)]
 
             print('Training epoch %d, cost is ' % epoch, numpy.mean(mean_cost))
 
@@ -517,26 +538,33 @@ class GRBM(RBM):
                  hbias=None,
                  vbias=None,
                  numpy_rng=None,
-                 theano_rng=None):
+                 theano_rng=None,
+                 error_free=True):
         super(GRBM, self).__init__(input, n_visible, n_hidden,
                                    W, hbias, vbias, numpy_rng, theano_rng)
+        self.error_free = error_free
 
     def sample_v_given_h(self, h0_sample):
         ''' This function infers state of visible units given hidden units '''
         # compute the activation of the visible given the hidden sample
         v1_mean = tensor.dot(h0_sample, self.Wt) + self.vbias
 
-        # get a sample of the visible given their activation
-        #v1_sample = v1_mean + self.theano_rng.normal(size=v1_mean.shape,
-        #                                       avg=0, std=1.0,
-        #                                       dtype=theano.config.floatX)
-        # Error free reconstruction
-        v1_sample = v1_mean
+        if self.error_free:
+            v1_sample = v1_mean
+        else:
+            # get a sample of the visible given their activation
+            v1_sample = v1_mean + self.theano_rng.normal(size=v1_mean.shape,
+                                               avg=0, std=1.0,
+                                               dtype=theano.config.floatX)
+
         return [v1_mean, v1_mean, v1_sample]
 
     def gibbs_hvh(self, h0_sample):
         ''' This function implements one step of Gibbs sampling,
-            starting from the hidden state'''
+            starting from the hidden state.
+            For Gaussian Bernoulli we uses a mean field approximation
+            of the intermediate visible state.
+        '''
         pre_sigmoid_v1, v1_mean, v1_sample = self.sample_v_given_h(h0_sample)
         pre_sigmoid_h1, h1_mean, h1_sample = self.sample_h_given_v(v1_mean)
         return [pre_sigmoid_v1, v1_mean, v1_sample,
@@ -544,7 +572,10 @@ class GRBM(RBM):
 
     def gibbs_vhv(self, v0_sample):
         ''' This function implements one step of Gibbs sampling,
-            starting from the visible state'''
+            starting from the visible state.
+            For Gaussian Bernoulli we uses a mean field approximation
+            of the intermediate hidden state.
+        '''
         pre_sigmoid_h1, h1_mean, h1_sample = self.sample_h_given_v(v0_sample)
         pre_sigmoid_v1, v1_mean, v1_sample = self.sample_v_given_h(h1_mean)
         return [pre_sigmoid_h1, h1_mean, h1_sample,
@@ -552,22 +583,40 @@ class GRBM(RBM):
 
     def free_energy(self, v_sample):
         wx_b = tensor.dot(v_sample, self.W) + self.hbias
-        vbias_term = 0.5*tensor.sum((v_sample - self.vbias) ** 2, axis=1)
+        vbias_term = 0.5*tensor.sqr(v_sample - self.vbias).sum(axis=1)
         hidden_term = nnet.softplus(wx_b).sum(axis=1)
         return -hidden_term + vbias_term
 
     def get_reconstruction_cost(self, pre_sigmoid_nv):
-        """
-        .. todo::
-            Write ME
+        """ Compute mean squared error between reconstructed data and input data.
+
+            Mean over the samples and features.
 
         """
 
-        error = ((nnet.sigmoid(pre_sigmoid_nv) - self.input) ** 2).sum(axis=1).mean()
+        error = tensor.sqr(nnet.sigmoid(pre_sigmoid_nv) - self.input).mean()
 
         return error
 
-def test_rbm(learning_rate=0.1, training_epochs=15,
+    def training(self, train_set_x, training_epochs, batch_size=10,
+                 learning_rate=0.01, k=1,
+                 initial_momentum = 0.0, final_momentum = 0.0,
+                 weightcost = 0.0, display_fn=None,
+                 lambda_2 = 0.1):
+
+        cost, updates = self.get_cost_updates(lr=learning_rate,
+                                              k=k,
+                                              lambda_2=lambda_2,
+                                              weightcost=weightcost,
+                                              batch_size=batch_size
+                                              )
+
+        self.learn_model(train_set_x, training_epochs, batch_size,
+                   initial_momentum, final_momentum,
+                   cost, updates,
+                   display_fn)
+
+def test(class_to_test=RBM,learning_rate=0.1, training_epochs=15,
              datafile='../data/train-images-idx3-ubyte', batch_size=20,
              n_chains=20, n_samples=10, output_folder='rbm_plots',
              n_hidden=500):
@@ -594,9 +643,12 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
     raw_dataset = mnist.images
     n_data = raw_dataset.shape[0]
 
-    # TODO: the selection of the normalization should be done at runtime
-    dataset = raw_dataset/255.0     # for binary rbm
-#    dataset = mnist.normalize(raw_dataset) # for gaussian rbm
+    if class_to_test == GRBM:
+        dataset = mnist.normalize(raw_dataset)
+        # Gaussian RBM needs a lower learning rate. See Hinton'10
+        learning_rate = learning_rate / 10
+    else:
+        dataset = raw_dataset/255
 
     train_set_x = theano.shared(dataset[0:n_data*5/6], borrow=True)
     test_set_x = theano.shared(dataset[n_data*5/6:n_data], borrow=True)
@@ -619,7 +671,7 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
     os.chdir(output_folder)
 
     # construct the RBM class
-    rbm = RBM(input=x, n_visible=mnist.sizeX * mnist.sizeY,
+    rbm = class_to_test(input=x, n_visible=mnist.sizeX * mnist.sizeY,
               n_hidden=n_hidden, numpy_rng=rng, theano_rng=theano_rng)
 
     rbm.training(train_set_x,
@@ -643,7 +695,7 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
         )
     )
     plot_every = 500
-    # define one step of Gibbs sampling (mf = mean-field) define a
+    # define one step of Gibbs sampling define a
     # function that does `plot_every` steps before returning the
     # sample for plotting
     (
@@ -694,7 +746,4 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
     os.chdir('../')
 
 if __name__ == '__main__':
-
-# For Gaussian RBM use a smaller learning rate, 0.01 is a good starting point
-# TODO: Gaussian and Binary tests should be selected at run-time
-    test_rbm(learning_rate=0.1, training_epochs=15)
+    test(class_to_test=RBM, training_epochs=5)

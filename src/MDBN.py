@@ -41,31 +41,9 @@ from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 #from theano.compile.nanguardmode import NanGuardMode
 
 from utils import zscore
+from utils import get_minibatches_idx
 from rbm import RBM
 from rbm import GRBM
-
-def get_minibatches_idx(n, batch_size, shuffle=False):
-    """
-    Used to shuffle the dataset at each iteration.
-    """
-
-    idx_list = numpy.arange(n, dtype="int32")
-
-    if shuffle:
-        numpy.random.shuffle(idx_list)
-
-    minibatches = []
-    minibatch_start = 0
-    for i in range(n // batch_size):
-        minibatches.append(idx_list[minibatch_start:
-        minibatch_start + batch_size])
-        minibatch_start += batch_size
-
-    if (minibatch_start != n):
-        # Make a minibatch out of what is left
-        minibatches.append(idx_list[minibatch_start:])
-
-    return range(len(minibatches)), minibatches
 
 class HiddenLayer(object):
     def __init__(self, rng, input, n_in, n_out, W=None, b=None,
@@ -195,8 +173,6 @@ class DBN(object):
         # the data is presented as rasterized images
         self.x = tensor.matrix('x')
 
-        theano.printing.Print('this is a very important value')(self.x)
-
         # The DBN is an MLP, for which all weights of intermediate
         # layers are shared with a different RBM.  We will first
         # construct the DBN as a deep multilayer perceptron, and when
@@ -318,30 +294,23 @@ class DBN(object):
 
             # compile the theano function
             if monitor:
-                fn = theano.function(
-                    inputs=[indexes, momentum, theano.In(learning_rate, value=0.1)],
-                    outputs=[cost, feg],
-                    updates=updates,
-                    givens={
+                mode = theano.compile.MonitorMode(pre_func=self.inspect_inputs)
+            else:
+                mode = theano.config.mode
+
+            fn = theano.function(
+                inputs=[indexes, momentum, theano.In(learning_rate, value=0.1)],
+                outputs=[cost, feg],
+                updates=updates,
+                givens={
                         self.x: train_set_x[indexes[:-1]],  # leave one out
                         rbm.momentum: momentum,
                         test_sample: train_set_x[indexes[-1]]
-                    }
-                    , mode = theano.compile.MonitorMode(
-                                 pre_func=self.inspect_inputs)
-    #                ,mode=NanGuardMode(nan_is_error=True, inf_is_error=True, big_is_error=True)
-                )
-            else:
-                fn = theano.function(
-                    inputs=[indexes, momentum, theano.In(learning_rate, value=0.1)],
-                    outputs=[cost, feg],
-                    updates=updates,
-                    givens={
-                        self.x: train_set_x[indexes[:-1]],
-                        rbm.momentum: momentum,
-                        test_sample: train_set_x[indexes[-1]]
-                    }
-                )
+                },
+                mode = mode
+    #           mode=NanGuardMode(nan_is_error=True, inf_is_error=True, big_is_error=True)
+            )
+
             # append `fn` to the list of functions
             pretrain_fns.append(fn)
 
@@ -474,7 +443,7 @@ def test(batch_size=20,
               hidden_layers_sizes=[],
               n_outs=40)
     rna_DBN.pretraining(datarna, n_data, batch_size, k=10,
-                        pretraining_epochs=[2000],
+                        pretraining_epochs=[1200],
                         pretrain_lr=[0.0005])
 
     output_RNA = rna_DBN.output(datarna)
@@ -484,7 +453,7 @@ def test(batch_size=20,
               hidden_layers_sizes=[400],
               n_outs=40)
     ge_DBN.pretraining(datage, n_data, batch_size, k=1,
-                       pretraining_epochs=[8000, 800],
+                       pretraining_epochs=[1400, 800],
                        pretrain_lr=[0.0005, 0.1])
 
     output_GE = ge_DBN.output(datage)
@@ -494,7 +463,7 @@ def test(batch_size=20,
               hidden_layers_sizes=[400],
               n_outs=40)
     me_DBN.pretraining(datame, n_data, batch_size, k=1,
-                       pretraining_epochs=[8000, 800],
+                       pretraining_epochs=[800, 800],
                        pretrain_lr=[0.0005, 0.1])
 
     output_ME = me_DBN.output(datame)
