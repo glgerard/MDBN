@@ -260,6 +260,13 @@ class DBN(object):
     def inspect_outputs(self, i, node, fn):
         print(" output(s) value(s):", [output[0] for output in fn.outputs])
 
+    def output(self, dataset, layer=-1):
+        fn = theano.function(inputs=[],
+                             outputs=self.sigmoid_layers[layer].output(),
+                             givens={
+                                 self.x: dataset
+                             })
+        return fn
 
     def pretraining_functions(self, train_set_x, validation_set_x,
                               batch_size, k, monitor=False):
@@ -340,8 +347,9 @@ class DBN(object):
                     mode=mode
                 )
             else:
-                t_sample = self.sigmoid_layers[i-1].output(train_set_x)
-                v_sample = self.sigmoid_layers[i-1].output(validation_set_x)
+                t_sample = theano.shared(self.output(train_set_x,i-1)())
+                v_sample = theano.shared(self.output(validation_set_x,i-1)())
+
                 fn = theano.function(
                     inputs=[indexes],
                     outputs=feg,
@@ -405,16 +413,16 @@ class DBN(object):
                     momentum = 0.9
 
                 for mb, minibatch in enumerate(minibatches):
-                    c.append(pretraining_fns[i](indexes=range(39),
+                    c.append(pretraining_fns[i](indexes=minibatch,
                                                 momentum=momentum,
                                                 lr=pretrain_lr[i]))
 
                     if mb == 0:
-                        f.append(overfitting_monitor_fns[i](indexes=minibatch))
+                        f.append(overfitting_monitor_fns[i](indexes=range(39)))
 
                 if epoch % print_frequency == 0:
                     print('Free energy gap (layer %i, epoch %i): ' % (i, epoch), end=' ')
-                    free_energy.append(numpy.mean(f))
+                    free_energy.append(f[-1])
                     print(free_energy[-1])
                     print('Pre-training cost (layer %i, epoch %d): ' % (i, epoch), end=' ')
                     mean_cost.append(numpy.mean(c))
@@ -428,14 +436,6 @@ class DBN(object):
         print('The pretraining code for file ' + os.path.split(__file__)[1] +
               ' ran for %.2fm' % ((end_time - start_time) / 60.), file=sys.stderr)
 
-
-    def output(self, dataset):
-        fn = theano.function(inputs=[],
-                             outputs=self.sigmoid_layers[-1].output(),
-                             givens={
-                                 self.x: dataset
-                             })
-        return fn
 
 # batch_size changed from 1 as in M.Liang to 20
 
@@ -574,7 +574,7 @@ def train_GE(datafile, datadir='data'):
                               batch_size=20,
                               k=1,
                               layers_sizes=[400, 40],
-                              pretraining_epochs=[8000, 800],
+                              pretraining_epochs=[2, 2],
                               pretrain_lr=[0.0005, 0.1])
 
 def train_RNA(datafile, datadir='data'):
