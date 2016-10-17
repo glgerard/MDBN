@@ -28,6 +28,7 @@ from __future__ import print_function, division
 
 import timeit
 import os
+import matplotlib.pyplot as plt
 
 import numpy
 import theano
@@ -250,7 +251,7 @@ class RBM(object):
                 pre_sigmoid_v1, v1_mean, v1_sample]
 
     def get_cost_updates(self, lr=0.1, k=1,
-                         lambda_1=0.0, lambda_2=0.0,
+                         lambda_2=0.0,
                          weightcost = 0.0,
                          batch_size=None, persistent=None):
         """This functions implements one step of CD-k or PCD-k
@@ -435,11 +436,14 @@ class RBM(object):
 
         return cross_entropy
 
-    def training(self, train_set_x, training_epochs, batch_size=10,
+    def training(self, train_set_x, validation_set_x,
+                 training_epochs, batch_size=10,
                  learning_rate=0.1, k=1,
                  initial_momentum = 0.0, final_momentum = 0.0,
-                 weightcost = 0.0, display_fn=None,
-                 persistent=True):
+                 weightcost = 0.0,
+                 lambda_2 = 0.0,
+                 persistent = True,
+                 display_fn=None, graph_output=False):
 
         if persistent:
             # initialize storage for the persistent chain (state = hidden
@@ -457,20 +461,26 @@ class RBM(object):
                                               weightcost=weightcost,
                                               batch_size=batch_size,
                                               persistent=persistent_chain
-                                              )
+                                            )
 
-        self.learn_model(train_set_x, training_epochs, batch_size,
-                   initial_momentum, final_momentum,
-                   cost, updates,
-                   display_fn)
+        self.learn_model(train_set_x=train_set_x,
+                         validation_set_x=validation_set_x,
+                         training_epochs=training_epochs,
+                         batch_size=batch_size,
+                         initial_momentum=initial_momentum,
+                         final_momentum=final_momentum,
+                         cost=cost,
+                         updates=updates,
+                         display_fn=display_fn,
+                         graph_output=graph_output)
 
     def learn_model(self, train_set_x, validation_set_x,
                     training_epochs, batch_size,
                     initial_momentum, final_momentum,
                     cost, updates,
-                    display_fn):
+                    display_fn, graph_output):
         # allocate symbolic variables for the data
-        indexes = tensor.lvector('indexes')  # index to a [mini]batch
+        indexes = tensor.vector('indexes', dtype='int32')  # index to a [mini]batch
         momentum = tensor.scalar('momentum', dtype=theano.config.floatX)
 
         # it is ok for a theano function to have no output
@@ -502,10 +512,24 @@ class RBM(object):
             }
         )
 
+        if graph_output:
+            v_sample = tensor.matrix('v_sample', dtype=theano.config.floatX)
+            h_out = self.sample_h_given_v(v_sample)
+
+            get_output = theano.function(
+                    [v_sample],
+                    outputs=h_out,
+            )
+
         # compute number of minibatches for training, validation and testing
         n_train_data = train_set_x.get_value(borrow=True).shape[0]
 
         plotting_time = 0.
+
+        if graph_output:
+            fig = plt.figure(1)
+            plt.ion()
+
         start_time = timeit.default_timer()
 
         # go through training epochs
@@ -525,7 +549,7 @@ class RBM(object):
             for batch_indexes in minibatches:
                 mean_cost += [train_rbm(batch_indexes, momentum)]
 
-            feg = feg_rbm(range(39))
+            feg = feg_rbm(range(validation_set_x.get_value(borrow=True).shape[0]))
 
             print('Training epoch %d, cost is ' % epoch, numpy.mean(mean_cost))
             print('Free energy gap is ', feg)
@@ -536,6 +560,17 @@ class RBM(object):
                 # Construct image from the weight matrix
                 Wimg = display_fn(self.W.get_value(borrow=True), self.n_hidden)
                 scipy.misc.imsave('filters_at_epoch_%i.png' % epoch, Wimg)
+            if graph_output:
+                validation_output = get_output(validation_set_x.get_value(borrow=True))
+                plt.clf()
+                plt.subplot(2, 1, 1)
+                plt.imshow(validation_output[1])
+                training_output = get_output(train_set_x.get_value(borrow=True))
+                plt.subplot(2, 1, 2)
+                plt.imshow(training_output[1][range(validation_set_x.get_value(borrow=True).shape[0])])
+                plt.draw()
+                plt.pause(0.05)
+
             plotting_stop = timeit.default_timer()
             plotting_time += (plotting_stop - plotting_start)
 
@@ -619,8 +654,10 @@ class GRBM(RBM):
                  training_epochs, batch_size=10,
                  learning_rate=0.01, k=1,
                  initial_momentum = 0.0, final_momentum = 0.0,
-                 weightcost = 0.0, display_fn=None,
-                 lambda_2 = 0.1):
+                 weightcost = 0.0,
+                 lambda_2 = 0.1,
+                 persistent = False,
+                 display_fn=None, graph_output=False):
 
         cost, updates = self.get_cost_updates(lr=learning_rate,
                                               k=k,
@@ -629,11 +666,16 @@ class GRBM(RBM):
                                               batch_size=batch_size
                                               )
 
-        self.learn_model(train_set_x, validation_set_x,
-                         training_epochs, batch_size,
-                   initial_momentum, final_momentum,
-                   cost, updates,
-                   display_fn)
+        self.learn_model(train_set_x=train_set_x,
+                         validation_set_x=validation_set_x,
+                         training_epochs=training_epochs,
+                         batch_size=batch_size,
+                         initial_momentum=initial_momentum,
+                         final_momentum=final_momentum,
+                         cost=cost,
+                         updates=updates,
+                         display_fn=display_fn,
+                         graph_output=graph_output)
 
 def test(class_to_test=RBM,
          learning_rate=0.1,
@@ -673,7 +715,7 @@ def test(class_to_test=RBM,
     else:
         dataset = raw_dataset/255
 
-    validation_set_size = 39
+    validation_set_size = 60
 
     train_set_x = theano.shared(dataset[0:int(n_data*5/6)-validation_set_size], borrow=True)
     validation_set_x = theano.shared(dataset[int(n_data*5/6)-validation_set_size:int(n_data*5/6)])
@@ -701,14 +743,15 @@ def test(class_to_test=RBM,
     rbm = class_to_test(input=x, n_visible=mnist.sizeX * mnist.sizeY,
               n_hidden=n_hidden, numpy_rng=rng, theano_rng=theano_rng)
 
-    rbm.training(train_set_x,
-                 validation_set_x,
-                 training_epochs,
-                 batch_size,
-                 learning_rate,
+    rbm.training(train_set_x=train_set_x,
+                 validation_set_x=validation_set_x,
+                 training_epochs=training_epochs,
+                 batch_size=batch_size,
+                 learning_rate=learning_rate,
                  initial_momentum=0.6, final_momentum=0.9,
                  weightcost=0.0002,
-                 display_fn=mnist.display_weigths)
+                 display_fn=mnist.display_weigths,
+                 graph_output=True)
 
     #################################
     #     Sampling from the RBM     #
@@ -774,4 +817,4 @@ def test(class_to_test=RBM,
     os.chdir(root_dir)
 
 if __name__ == '__main__':
-    test(class_to_test=GRBM, training_epochs=5)
+    test(class_to_test=RBM, training_epochs=8)

@@ -116,19 +116,14 @@ class HiddenLayer(object):
 
         self.activation = activation
 
-        # parameters of the model
-        self.params = [self.W, self.b]
-
-    def output(self, input=None):
-        if input is None:
-            input = self.input
         lin_output = tensor.dot(input, self.W) + self.b
-        result = (
+        self.output = (
             lin_output if self.activation is None
             else self.activation(lin_output)
         )
-        return result
 
+        # parameters of the model
+        self.params = [self.W, self.b]
 
 class DBN(object):
     """Deep Belief Network
@@ -213,7 +208,7 @@ class DBN(object):
                 else:
                     layer_input = input
             else:
-                layer_input = self.sigmoid_layers[-1].output()
+                layer_input = self.sigmoid_layers[-1].output
 
             print('Adding a layer with %i input and %i outputs' %
                   (input_size, stacked_layers_sizes[i]))
@@ -260,11 +255,11 @@ class DBN(object):
     def inspect_outputs(self, i, node, fn):
         print(" output(s) value(s):", [output[0] for output in fn.outputs])
 
-    def output(self, dataset, layer=-1):
+    def get_output(self, input, layer=-1):
         fn = theano.function(inputs=[],
-                             outputs=self.sigmoid_layers[layer].output(),
+                             outputs=self.sigmoid_layers[layer].output,
                              givens={
-                                 self.x: dataset
+                                 self.x: input
                              })
         return fn
 
@@ -294,7 +289,7 @@ class DBN(object):
         assert batch_size > 1
 
         pretrain_fns = []
-        overfit_monitor_fns = []
+        free_energy_gap_fns = []
         for i, rbm in enumerate(self.rbm_layers):
             # get the cost and the updates list
             # using CD-k here (persisent=None) for training each RBM.
@@ -336,38 +331,23 @@ class DBN(object):
 
             feg = rbm.free_energy_gap(train_sample, validation_sample)
 
-            if i == 0:
-                fn = theano.function(
-                    inputs=[indexes],
-                    outputs=feg,
-                    givens={
-                        train_sample: train_set_x[indexes],
-                        validation_sample: validation_set_x
-                    },
-                    mode=mode
-                )
-            else:
-                t_sample = theano.shared(self.output(train_set_x,i-1)())
-                v_sample = theano.shared(self.output(validation_set_x,i-1)())
+            # Obtain the input of layer i as the output of the previous
+            # layer
+            fn = theano.function(
+                inputs=[train_sample, validation_sample],
+                outputs=feg,
+                mode=mode
+            )
 
-                fn = theano.function(
-                    inputs=[indexes],
-                    outputs=feg,
-                    givens={
-                        train_sample: t_sample[indexes],
-                        validation_sample: v_sample
-                    },
-                    mode=mode
-                )
+            free_energy_gap_fns.append(fn)
 
-            overfit_monitor_fns.append(fn)
-
-        return pretrain_fns, overfit_monitor_fns
+        return pretrain_fns, free_energy_gap_fns
 
     def pretraining(self, train_set_x, validation_set_x,
                     batch_size, k,
                     pretraining_epochs, pretrain_lr,
-                    monitor=False):
+                    print_frequency=0,
+                    monitor=False, graph_output=False):
         #########################
         # PRETRAINING THE MODEL #
         #########################
@@ -376,7 +356,7 @@ class DBN(object):
         print('Training set sample size %i' % train_set_x.get_value().shape[0])
         print('Validation set sample size %i' % validation_set_x.get_value().shape[0])
 
-        pretraining_fns, overfitting_monitor_fns = self.pretraining_functions(train_set_x=train_set_x,
+        pretraining_fns, free_energy_gap_fns = self.pretraining_functions(train_set_x=train_set_x,
                                                      validation_set_x=validation_set_x,
                                                      batch_size=batch_size,
                                                      k=k,
@@ -386,19 +366,25 @@ class DBN(object):
         start_time = timeit.default_timer()
         # Pre-train layer-wise
 
+        if graph_output:
+            plt.ion()
+
         n_data = train_set_x.get_value().shape[0]
 
         for i in range(self.n_layers):
+            if graph_output:
+                plt.figure(i+1)
+
             if isinstance(self.rbm_layers[i], GRBM):
                 momentum = 0.0
             else:
                 momentum = 0.6
 
-            print_frequency = int(pretraining_epochs[i] / 40)
             if print_frequency == 0:
                 print_frequency = 1
 
             print('Printing every %i epochs' % print_frequency)
+
             # go through pretraining epochs
             mean_cost = []
             free_energy = []
@@ -416,9 +402,30 @@ class DBN(object):
                     c.append(pretraining_fns[i](indexes=minibatch,
                                                 momentum=momentum,
                                                 lr=pretrain_lr[i]))
-
                     if mb == 0:
-                        f.append(overfitting_monitor_fns[i](indexes=range(39)))
+                        train_data = train_set_x.get_value(borrow=True)
+                        validation_data = validation_set_x.get_value(borrow=True)
+                        if i == 0:
+                            input_train_set = train_data
+                            input_validation_set = validation_data
+                        else:
+                            input_train_set = self.get_output(
+                                train_data[range(validation_data.shape[0])],i-1)()
+                            input_validation_set = self.get_output(validation_data, i - 1)()
+                        f.append(free_energy_gap_fns[i](
+                            input_train_set,
+                            input_validation_set))
+
+                # Plot the output
+                if graph_output and epoch % print_frequency == 0:
+                    plt.clf()
+                    training_output = self.get_output(train_set_x, i)()
+                    plt.subplot(1,1,1)
+                    plt.imshow(training_output)
+                    plt.axis('tight')
+                    plt.title('epoch %d' % (epoch))
+                    plt.draw()
+                    plt.pause(0.05)
 
                 if epoch % print_frequency == 0:
                     print('Free energy gap (layer %i, epoch %i): ' % (i, epoch), end=' ')
@@ -427,9 +434,6 @@ class DBN(object):
                     print('Pre-training cost (layer %i, epoch %d): ' % (i, epoch), end=' ')
                     mean_cost.append(numpy.mean(c))
                     print(mean_cost[-1])
-
-#            plt.plot(mean_cost)
-#            plt.plot(free_energy)
 
         end_time = timeit.default_timer()
 
@@ -476,9 +480,10 @@ def test(datafiles,
     top_DBN.pretraining(joint_data, joint_data.get_value().shape[0],
                         batch_size, k=1,
                         pretraining_epochs=[800, 800],
-                        pretrain_lr=[0.1, 0.1])
+                        pretrain_lr=[0.1, 0.1],
+                        print_frequency=20)
 
-    classes = top_DBN.output(joint_data, range(joint_data.get_value().shape[0]))
+    classes = top_DBN.get_output(joint_data, range(joint_data.get_value().shape[0]))
 
     if not os.path.isdir(output_folder):
         os.makedirs(output_folder)
@@ -524,8 +529,9 @@ def load_n_preprocess_data(datafile, datadir='data'):
     # mean and zero variance
     _, _, data = importdata(datafile, datadir)
     data = zscore(data.T)
-    train_set = theano.shared(data[:int(data.shape[0] * 0.9)], borrow=True)
-    validation_set = theano.shared(data[int(data.shape[0] * 0.9):], borrow=True)
+    validation_set_size = 35
+    train_set = theano.shared(data[:data.shape[0]-validation_set_size], borrow=True)
+    validation_set = theano.shared(data[data.shape[0]-validation_set_size:], borrow=True)
     return train_set, validation_set
 
 def train_bottom_layer(train_set, validation_set,
@@ -533,7 +539,9 @@ def train_bottom_layer(train_set, validation_set,
                        k=1, layers_sizes=[40],
                        pretraining_epochs=[800],
                        pretrain_lr=[0.0005],
-                       rng=None
+                       rng=None,
+                       print_frequency=1,
+                       graph_output=False
                     ):
 
     if rng is None:
@@ -549,11 +557,13 @@ def train_bottom_layer(train_set, validation_set,
                         validation_set,
                         batch_size, k=k,
                         pretraining_epochs=pretraining_epochs,
-                        pretrain_lr=pretrain_lr)
-    output = dbn.output(train_set)
+                        pretrain_lr=pretrain_lr,
+                        print_frequency=print_frequency,
+                        graph_output=graph_output)
+    output = dbn.get_output(train_set)
     return dbn, output
 
-def train_ME(datafile, datadir='data'):
+def train_ME(datafile, graph_output=False, datadir='data'):
     print('*** Training on ME ***')
 
     train_set, validation_set = load_n_preprocess_data(datafile, datadir)
@@ -563,9 +573,11 @@ def train_ME(datafile, datadir='data'):
                               k=1,
                               layers_sizes=[400, 40],
                               pretraining_epochs=[8000, 800],
-                              pretrain_lr=[0.0005, 0.1])
+                              pretrain_lr=[0.0005, 0.1],
+                              print_frequency=40,
+                              graph_output=graph_output)
 
-def train_GE(datafile, datadir='data'):
+def train_GE(datafile, graph_output=False, datadir='data'):
     print('*** Training on GE ***')
 
     train_set, validation_set = load_n_preprocess_data(datafile, datadir)
@@ -574,22 +586,26 @@ def train_GE(datafile, datadir='data'):
                               batch_size=20,
                               k=1,
                               layers_sizes=[400, 40],
-                              pretraining_epochs=[2, 2],
-                              pretrain_lr=[0.0005, 0.1])
+                              pretraining_epochs=[80, 80],
+                              pretrain_lr=[0.0005, 0.1],
+                              print_frequency=1,
+                              graph_output=graph_output)
 
-def train_RNA(datafile, datadir='data'):
+def train_RNA(datafile, graph_output=False, datadir='data'):
     print('*** Training on RNA ***')
 
     train_set, validation_set = load_n_preprocess_data(datafile, datadir)
 
     return train_bottom_layer(train_set, validation_set,
-              batch_size=10,
-              k=10,
-              layers_sizes=[40],
-              pretraining_epochs=[1600],
-              pretrain_lr=[0.0005])
+                                batch_size=10,
+                                k=10,
+                                layers_sizes=[40],
+                                pretraining_epochs=[450],
+                                pretrain_lr=[0.0005],
+                                print_frequency=10,
+                                graph_output=graph_output)
 
-def train_MNIST_Gaussian():
+def train_MNIST_Gaussian(graph_output=False):
     # Load the data
     mnist = MNIST()
     raw_dataset = mnist.images
@@ -603,11 +619,13 @@ def train_MNIST_Gaussian():
     print('*** Training on MNIST ***')
 
     return train_bottom_layer(train_set, validation_set,
-                          batch_size=20,
-                          k=1,
-                          layers_sizes=[500],
-                          pretraining_epochs=[5],
-                          pretrain_lr=[0.01])
+                                batch_size=20,
+                                k=1,
+                                layers_sizes=[500],
+                                pretraining_epochs=[5],
+                                pretrain_lr=[0.01],
+                                print_frequency=1,
+                                graph_output=graph_output)
 
 
 def prepare_datafiles(datadir='data'):
@@ -636,7 +654,7 @@ if __name__ == '__main__':
     datafiles = prepare_datafiles()
 #    test(datafiles)
 
-#    train_RNA(datafiles['mRNA'])
-    train_GE(datafiles['GE'])
+#    train_RNA(datafiles['mRNA'],graph_output=True)
+    train_GE(datafiles['GE'],graph_output=True)
 
-#    train_MNIST_Gaussian()
+#    train_MNIST_Gaussian(graph_output=True)
