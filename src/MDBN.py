@@ -566,46 +566,68 @@ def train_bottom_layer(train_set, validation_set,
     output = dbn.get_output(train_set)
     return dbn, output
 
-def train_ME(datafile, graph_output=False, datadir='data'):
+def train_ME(datafile,
+             batch_size=20,
+             k=1,
+             layers_sizes=[400, 40],
+             pretraining_epochs=[8000, 800],
+             pretrain_lr=[0.0005, 0.1],
+             print_frequency=40,
+             graph_output=False, datadir='data'):
     print('*** Training on ME ***')
 
     train_set, validation_set = load_n_preprocess_data(datafile, datadir)
 
     return train_bottom_layer(train_set, validation_set,
-                              batch_size=20,
-                              k=1,
-                              layers_sizes=[400, 40],
-                              pretraining_epochs=[8000, 800],
-                              pretrain_lr=[0.0005, 0.1],
-                              print_frequency=40,
+                              batch_size=batch_size,
+                              k=k,
+                              layers_sizes=layers_sizes,
+                              pretraining_epochs=pretraining_epochs,
+                              pretrain_lr=pretrain_lr,
+                              print_frequency=print_frequency,
                               graph_output=graph_output)
 
-def train_GE(datafile, graph_output=False, datadir='data'):
+def train_GE(datafile,
+             batch_size=20,
+             k=1,
+             layers_sizes=[400, 40],
+             pretraining_epochs=[80, 80],
+             pretrain_lr=[0.0005, 0.1],
+             print_frequency=1,
+             graph_output=False, datadir='data'):
     print('*** Training on GE ***')
 
     train_set, validation_set = load_n_preprocess_data(datafile, datadir)
 
     return train_bottom_layer(train_set, validation_set,
-                              batch_size=20,
-                              k=1,
-                              layers_sizes=[400, 40],
-                              pretraining_epochs=[80, 80],
-                              pretrain_lr=[0.0005, 0.1],
-                              print_frequency=1,
+                              batch_size=batch_size,
+                              k=k,
+                              layers_sizes=layers_sizes,
+                              pretraining_epochs=pretraining_epochs,
+                              pretrain_lr=pretrain_lr,
+                              print_frequency=print_frequency,
                               graph_output=graph_output)
 
-def train_RNA(datafile, graph_output=False, datadir='data'):
+def train_RNA(datafile,
+              batch_size=10,
+              k=10,
+              layers_sizes=[40],
+              pretraining_epochs=[450],
+              pretrain_lr=[0.0005],
+              print_frequency=10,
+              graph_output=False,
+              datadir='data'):
     print('*** Training on RNA ***')
 
     train_set, validation_set = load_n_preprocess_data(datafile, datadir)
 
     return train_bottom_layer(train_set, validation_set,
-                                batch_size=10,
-                                k=10,
-                                layers_sizes=[40],
-                                pretraining_epochs=[450],
-                                pretrain_lr=[0.0005],
-                                print_frequency=10,
+                                batch_size=batch_size,
+                                k=k,
+                                layers_sizes=layers_sizes,
+                                pretraining_epochs=pretraining_epochs,
+                                pretrain_lr=pretrain_lr,
+                                print_frequency=print_frequency,
                                 graph_output=graph_output)
 
 def train_MNIST_Gaussian(graph_output=False):
