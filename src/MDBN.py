@@ -530,8 +530,11 @@ def load_n_preprocess_data(datafile, datadir='data'):
     _, _, data = importdata(datafile, datadir)
     data = zscore(data.T)
     validation_set_size = 35
-    train_set = theano.shared(data[:data.shape[0]-validation_set_size], borrow=True)
-    validation_set = theano.shared(data[data.shape[0]-validation_set_size:], borrow=True)
+    # pre shuffle the data
+    _, indexes = get_minibatches_idx(data.shape[0], data.shape[0] -
+                                     validation_set_size, shuffle = True)
+    train_set = theano.shared(data[indexes[0]], borrow=True)
+    validation_set = theano.shared(data[indexes[1]], borrow=True)
     return train_set, validation_set
 
 def train_bottom_layer(train_set, validation_set,
