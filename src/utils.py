@@ -26,11 +26,6 @@ All rights reserved.
 
 import numpy
 
-def zscore(X):
-    X = X - numpy.mean(X,axis=0,keepdims=True)
-    X = X / numpy.std(X,axis=0,keepdims=True)
-    return X
-
 def get_minibatches_idx(n, batch_size, shuffle=False):
     """
     Used to shuffle the dataset at each iteration.

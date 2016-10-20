@@ -42,7 +42,7 @@ from theano import tensor
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 #from theano.compile.nanguardmode import NanGuardMode
 
-from utils import zscore
+from scipy import stats
 from utils import get_minibatches_idx
 from rbm import RBM
 from rbm import GRBM
@@ -261,7 +261,7 @@ class DBN(object):
                              givens={
                                  self.x: input
                              })
-        return fn
+        return fn()
 
     def pretraining_functions(self, train_set_x, validation_set_x,
                               batch_size, k, monitor=False):
@@ -410,8 +410,8 @@ class DBN(object):
                             input_validation_set = validation_data
                         else:
                             input_train_set = self.get_output(
-                                train_data[range(validation_data.shape[0])],i-1)()
-                            input_validation_set = self.get_output(validation_data, i - 1)()
+                                train_data[range(validation_data.shape[0])], i-1)
+                            input_validation_set = self.get_output(validation_data, i-1)
                         f.append(free_energy_gap_fns[i](
                             input_train_set,
                             input_validation_set))
@@ -419,7 +419,7 @@ class DBN(object):
                 # Plot the output
                 if graph_output and epoch % print_frequency == 0:
                     plt.clf()
-                    training_output = self.get_output(train_set_x, i)()
+                    training_output = self.get_output(train_set_x, i)
                     plt.subplot(1,1,1)
                     plt.imshow(training_output)
                     plt.axis('tight')
@@ -483,7 +483,7 @@ def test(datafiles,
                         pretrain_lr=[0.1, 0.1],
                         print_frequency=20)
 
-    classes = top_DBN.get_output(joint_data, range(joint_data.get_value().shape[0]))
+    classes = top_DBN.get_output(joint_data)
 
     if not os.path.isdir(output_folder):
         os.makedirs(output_folder)
@@ -521,18 +521,26 @@ def importdata(file, datadir):
     os.chdir(root_dir)
     return (data.shape[1], ncols-1, data)
 
-def load_n_preprocess_data(datafile, datadir='data'):
+def load_n_preprocess_data(datafile, range=None, datadir='data'):
     # Load the data, each column is a single person
     # Pass to a row representation, i.e. the data for each person is now on a
     # single row.
     # Normalize the data so that each measurement on our population has zero
     # mean and zero variance
     _, _, data = importdata(datafile, datadir)
-    data = zscore(data.T)
+
+    data = stats.zscore(data)
+
+    if range is not None:
+        data = numpy.clip(data, range[0], range[1])
+
+    data = data.T
+
     validation_set_size = 35
     # pre shuffle the data
     _, indexes = get_minibatches_idx(data.shape[0], data.shape[0] -
                                      validation_set_size, shuffle = True)
+
     train_set = theano.shared(data[indexes[0]], borrow=True)
     validation_set = theano.shared(data[indexes[1]], borrow=True)
     return train_set, validation_set
@@ -567,16 +575,17 @@ def train_bottom_layer(train_set, validation_set,
     return dbn, output
 
 def train_ME(datafile,
+             clip=None,
              batch_size=20,
              k=1,
              layers_sizes=[400, 40],
              pretraining_epochs=[8000, 800],
              pretrain_lr=[0.0005, 0.1],
-             print_frequency=40,
+             print_frequency=100,
              graph_output=False, datadir='data'):
     print('*** Training on ME ***')
 
-    train_set, validation_set = load_n_preprocess_data(datafile, datadir)
+    train_set, validation_set = load_n_preprocess_data(datafile, range=clip, datadir=datadir)
 
     return train_bottom_layer(train_set, validation_set,
                               batch_size=batch_size,
@@ -588,16 +597,17 @@ def train_ME(datafile,
                               graph_output=graph_output)
 
 def train_GE(datafile,
+             clip=(-5,5),
              batch_size=20,
              k=1,
              layers_sizes=[400, 40],
-             pretraining_epochs=[80, 80],
+             pretraining_epochs=[8000, 800],
              pretrain_lr=[0.0005, 0.1],
-             print_frequency=1,
+             print_frequency=100,
              graph_output=False, datadir='data'):
     print('*** Training on GE ***')
 
-    train_set, validation_set = load_n_preprocess_data(datafile, datadir)
+    train_set, validation_set = load_n_preprocess_data(datafile, range=clip, datadir=datadir)
 
     return train_bottom_layer(train_set, validation_set,
                               batch_size=batch_size,
@@ -609,17 +619,18 @@ def train_GE(datafile,
                               graph_output=graph_output)
 
 def train_RNA(datafile,
+              clip=(-5,5),
               batch_size=10,
               k=10,
               layers_sizes=[40],
-              pretraining_epochs=[450],
+              pretraining_epochs=[8000],
               pretrain_lr=[0.0005],
-              print_frequency=10,
+              print_frequency=100,
               graph_output=False,
               datadir='data'):
     print('*** Training on RNA ***')
 
-    train_set, validation_set = load_n_preprocess_data(datafile, datadir)
+    train_set, validation_set = load_n_preprocess_data(datafile, range=clip, datadir=datadir)
 
     return train_bottom_layer(train_set, validation_set,
                                 batch_size=batch_size,
