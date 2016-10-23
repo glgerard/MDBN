@@ -380,7 +380,7 @@ class DBN(object):
         v_set = validation_set_x.get_value(borrow=True)
 
         # early-stopping parameters
-        patience = 10000  # look as this many examples regardless
+        patience = 20000  # look as this many examples regardless
         patience_increase = 2  # wait this much longer when a new best is
         # found
         improvement_threshold = 0.995  # a relative improvement of this much is
@@ -401,26 +401,25 @@ class DBN(object):
                 momentum = 0.6
 
             # go through pretraining epochs
-            best_free_energy_gap = numpy.inf
+            best_cost = numpy.inf
             epoch = 0
             done_looping = False
             while (epoch < pretraining_epochs[i]) and (not done_looping):
                 epoch = epoch + 1
                 # go through the training set
-                c = []
                 if not isinstance(self.rbm_layers[i], GRBM) and epoch == 6:
                     momentum = 0.9
 
                 for mb, minibatch in enumerate(minibatches):
-                    c.append(pretraining_fns[i](indexes=minibatch,
+                    current_cost = pretraining_fns[i](indexes=minibatch,
                                                 momentum=momentum,
-                                                lr=pretrain_lr[i]))
+                                                lr=pretrain_lr[i])
                     # iteration number
                     iter = (epoch - 1) * n_train_batches + mb
 
                     if (iter + 1) % validation_frequency == 0:
                         print('Pre-training cost (layer %i, epoch %d): ' % (i, epoch), end=' ')
-                        print(c[-1])
+                        print(current_cost)
 
                         # Plot the output
                         if graph_output:
@@ -433,34 +432,34 @@ class DBN(object):
                             plt.draw()
                             plt.pause(0.05)
 
-                        # Compute the free energy gap
-                        if i == 0:
-                            input_t_set = t_set
-                            input_v_set = v_set
-                        else:
-                            input_t_set = self.get_output(
-                                            t_set[range(v_set.shape[0])], i-1)
-                            input_v_set = self.get_output(v_set, i-1)
-
-                        free_energy_train, free_energy_test = free_energy_gap_fns[i](
-                                            input_t_set,
-                                            input_v_set)
-                        free_energy_gap = numpy.fabs(free_energy_test.mean() - free_energy_train.mean())
-
-                        print('Free energy gap (layer %i, epoch %i): ' % (i, epoch), end=' ')
-                        print(free_energy_gap)
-
                         # if we got the best validation score until now
-                        if free_energy_gap < best_free_energy_gap:
+                        if current_cost < best_cost:
                             # improve patience if loss improvement is good enough
                             if (
-                                    free_energy_gap < best_free_energy_gap *
+                                    current_cost < best_cost *
                                     improvement_threshold
                             ):
                                 patience = max(patience, iter * patience_increase)
 
-                            best_free_energy_gap = free_energy_gap
+                            best_cost = current_cost
                             best_iter = iter
+
+                            # Compute the free energy gap
+                            if i == 0:
+                                input_t_set = t_set
+                                input_v_set = v_set
+                            else:
+                                input_t_set = self.get_output(
+                                                t_set[range(v_set.shape[0])], i-1)
+                                input_v_set = self.get_output(v_set, i-1)
+
+                            free_energy_train, free_energy_test = free_energy_gap_fns[i](
+                                                input_t_set,
+                                                input_v_set)
+                            free_energy_gap = free_energy_test.mean() - free_energy_train.mean()
+
+                            print('Free energy gap (layer %i, epoch %i): ' % (i, epoch), end=' ')
+                            print(free_energy_gap)
 
                     if patience <= iter:
                         done_looping = True
@@ -477,6 +476,7 @@ class DBN(object):
 def test(datafiles,
          datadir='data',
          batch_size=20,
+         graph_output=False,
          output_folder='MDBN_run',
          rng=None):
     """
@@ -492,28 +492,42 @@ def test(datafiles,
     #     Training the RBM          #
     #################################
 
+    rna_DBN, output_RNA_t_set, output_RNA_v_set = train_RNA(datafiles['mRNA'],
+                                    graph_output=graph_output, datadir=datadir)
 
-    rna_DBN, output_RNA = train_RNA(datafiles['mRNA'], datadir)
+    ge_DBN, output_GE_t_set, output_GE_v_set = train_GE(datafiles['GE'],
+                                 graph_output=graph_output, datadir=datadir)
 
-    ge_DBN, output_GE = train_GE(datafiles['GE'], datadir)
-
-    me_DBN, output_ME = train_ME(datafiles['ME'], datadir)
+    me_DBN, output_ME_t_set, output_ME_v_set = train_ME(datafiles['ME'],
+                                 graph_output=graph_output, datadir=datadir)
 
     print('*** Training on joint layer ***')
 
-    joint_data = theano.shared(numpy.concatenate([
-                    output_RNA, output_GE, output_ME],axis=1))
+    joint_train_set = theano.shared(numpy.concatenate([
+                    output_RNA_t_set, output_GE_t_set, output_ME_t_set],axis=1), borrow=True)
+
+    joint_val_set = theano.shared(numpy.concatenate([
+                    output_RNA_v_set, output_GE_v_set, output_ME_v_set],axis=1), borrow=True)
 
     top_DBN = DBN(numpy_rng=rng, n_ins=120,
                   gauss=False,
                   hidden_layers_sizes=[24],
                   n_outs=8)
-    top_DBN.pretraining(joint_data, joint_data.get_value().shape[0],
+
+    top_DBN.pretraining(joint_train_set, joint_val_set,
                         batch_size, k=1,
                         pretraining_epochs=[800, 800],
                         pretrain_lr=[0.1, 0.1])
 
-    classes = top_DBN.get_output(joint_data)
+    # Identifying the classes
+
+    RNA_output = output_DBN(rna_DBN,datafiles['mRNA'])
+    GE_output = output_DBN(ge_DBN,datafiles['GE'])
+    ME_output = output_DBN(me_DBN,datafiles['ME'],transform_fn=numpy.power,exponent=1.0/6.0)
+
+    joint_output = theano.shared(numpy.concatenate([RNA_output, GE_output, ME_output],axis=1), borrow=True)
+
+    classes = top_DBN.get_output(joint_output)
 
     if not os.path.isdir(output_folder):
         os.makedirs(output_folder)
@@ -551,7 +565,13 @@ def importdata(file, datadir):
     os.chdir(root_dir)
     return (data.shape[1], ncols-1, data)
 
-def load_n_preprocess_data(datafile, range=None, transform_fn=None, exponent=1.0, repeats=20, datadir='data'):
+def load_n_preprocess_data(datafile,
+                           holdout=0.1,
+                           range=None,
+                           transform_fn=None,
+                           exponent=1.0,
+                           repeats=10,
+                           datadir='data'):
     # Load the data, each column is a single person
     # Pass to a row representation, i.e. the data for each person is now on a
     # single row.
@@ -573,14 +593,18 @@ def load_n_preprocess_data(datafile, range=None, transform_fn=None, exponent=1.0
     if repeats > 1:
         data = numpy.repeat(data, repeats=repeats, axis=0)
 
-    validation_set_size = int(data.shape[0]*0.1)
+    validation_set_size = int(data.shape[0]*holdout)
 
     # pre shuffle the data
     _, indexes = get_minibatches_idx(data.shape[0], data.shape[0] -
                                      validation_set_size, shuffle = True)
 
     train_set = theano.shared(data[indexes[0]], borrow=True)
-    validation_set = theano.shared(data[indexes[1]], borrow=True)
+    if validation_set_size > 0:
+        validation_set = theano.shared(data[indexes[1]], borrow=True)
+    else:
+        validation_set = None
+
     return train_set, validation_set
 
 def train_bottom_layer(train_set, validation_set,
@@ -607,8 +631,11 @@ def train_bottom_layer(train_set, validation_set,
                         pretraining_epochs=pretraining_epochs,
                         pretrain_lr=pretrain_lr,
                         graph_output=graph_output)
-    output = dbn.get_output(train_set)
-    return dbn, output
+
+    output_train_set = dbn.get_output(train_set)
+    output_val_set = dbn.get_output(validation_set)
+
+    return dbn, output_train_set, output_val_set
 
 def train_ME(datafile,
              clip=None,
@@ -641,7 +668,7 @@ def train_GE(datafile,
              k=1,
              layers_sizes=[400, 40],
              pretraining_epochs=[8000, 800],
-             pretrain_lr=[0.0005, 0.1],
+             pretrain_lr=[0.0005, 0.01],
              graph_output=False,
              datadir='data'):
     print('*** Training on GE ***')
@@ -658,7 +685,7 @@ def train_GE(datafile,
 
 def train_RNA(datafile,
               clip=(-5,5),
-              batch_size=10,
+              batch_size=20,
               k=10,
               layers_sizes=[40],
               pretraining_epochs=[8000],
@@ -676,6 +703,23 @@ def train_RNA(datafile,
                                 pretraining_epochs=pretraining_epochs,
                                 pretrain_lr=pretrain_lr,
                                 graph_output=graph_output)
+
+def output_DBN(dbn,
+               datafile,
+               clip=(-5,5),
+               transform_fn=None,
+               exponent=1.0,
+               datadir='data'):
+    train_set, _ = load_n_preprocess_data(datafile,
+                                          holdout=0,
+                                          range=clip,
+                                          transform_fn=transform_fn,
+                                          exponent=exponent,
+                                          repeats=0,
+                                          datadir=datadir)
+
+    return dbn.get_output(train_set)
+
 
 def train_MNIST_Gaussian(graph_output=False):
     # Load the data
@@ -723,9 +767,8 @@ def prepare_datafiles(datadir='data'):
 
 if __name__ == '__main__':
     datafiles = prepare_datafiles()
-#    test(datafiles)
+    test(datafiles)
 
 #    train_RNA(datafiles['mRNA'],graph_output=True)
-    train_GE(datafiles['GE'],graph_output=True)
-
+#    train_GE(datafiles['GE'],graph_output=True)
 #    train_MNIST_Gaussian(graph_output=True)
