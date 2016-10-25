@@ -585,6 +585,9 @@ class RBM(object):
 
         print ('Training took %f minutes' % (pretraining_time / 60.))
 
+        if graph_output:
+            plt.close(fig)
+
 class GRBM(RBM):
     # Implement a Gaussian-Bernoulli Restricted Boltzmann Machine
     def __init__(self,

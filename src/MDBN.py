@@ -33,7 +33,6 @@ import zipfile
 import urllib
 
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 
 import numpy
 import theano
@@ -425,7 +424,6 @@ class DBN(object):
                         if graph_output:
                             plt.clf()
                             training_output = self.get_output(train_set_x, i)
-                            plt.subplot(1, 1, 1)
                             plt.imshow(training_output)
                             plt.axis('tight')
                             plt.title('epoch %d' % (epoch))
@@ -465,11 +463,14 @@ class DBN(object):
                         done_looping = True
                         break
 
+            if graph_output:
+                plt.close()
+
         end_time = timeit.default_timer()
+
 
         print('The pretraining code for file ' + os.path.split(__file__)[1] +
               ' ran for %.2fm' % ((end_time - start_time) / 60.), file=sys.stderr)
-
 
 # batch_size changed from 1 as in M.Liang to 20
 
@@ -641,9 +642,9 @@ def train_ME(datafile,
              clip=None,
              batch_size=20,
              k=1,
-             layers_sizes=[400, 40],
+             layers_sizes=[290, 40],
              pretraining_epochs=[8000, 800],
-             pretrain_lr=[0.0005, 0.01],
+             pretrain_lr=[0.01, 0.01],
              graph_output=False,
              datadir='data'):
     print('*** Training on ME ***')
@@ -666,9 +667,9 @@ def train_GE(datafile,
              clip=(-5,5),
              batch_size=20,
              k=1,
-             layers_sizes=[400, 40],
+             layers_sizes=[280, 40],
              pretraining_epochs=[8000, 800],
-             pretrain_lr=[0.0005, 0.01],
+             pretrain_lr=[0.01, 0.01],
              graph_output=False,
              datadir='data'):
     print('*** Training on GE ***')
