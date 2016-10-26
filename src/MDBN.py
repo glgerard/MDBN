@@ -426,7 +426,7 @@ class DBN(object):
                         if graph_output:
                             plt.clf()
                             training_output = self.get_output(train_set_x, i)
-                            plt.imshow(training_output)
+                            plt.imshow(training_output,cmap='gray')
                             plt.axis('tight')
                             plt.title('epoch %d' % (epoch))
                             plt.draw()
@@ -521,8 +521,11 @@ def test(datafiles,
     joint_train_set = theano.shared(numpy.concatenate([
                     output_RNA_t_set, output_GE_t_set, output_ME_t_set],axis=1), borrow=True)
 
-    joint_val_set = theano.shared(numpy.concatenate([
-                    output_RNA_v_set, output_GE_v_set, output_ME_v_set],axis=1), borrow=True)
+    if holdout > 0:
+        joint_val_set = theano.shared(numpy.concatenate([
+                            output_RNA_v_set, output_GE_v_set, output_ME_v_set],axis=1), borrow=True)
+    else:
+        joint_val_set = None
 
     top_DBN = DBN(numpy_rng=rng, n_ins=120,
                   gauss=False,
@@ -531,8 +534,8 @@ def test(datafiles,
 
     top_DBN.pretraining(joint_train_set, joint_val_set,
                         batch_size, k=1,
-                        pretraining_epochs=[800, 800],
-                        pretrain_lr=[0.1, 0.1])
+                        pretraining_epochs=[8000, 8000],
+                        pretrain_lr=[0.01, 0.01])
 
     # Identifying the classes
 
@@ -660,8 +663,8 @@ def train_ME(datafile,
              batch_size=20,
              k=1,
              layers_sizes=[400, 40],
-             pretraining_epochs=[8000, 800],
-             pretrain_lr=[0.0005, 0.01],
+             pretraining_epochs=[8000, 8000],
+             pretrain_lr=[0.005, 0.01],
              holdout=0.1,
              repeats=10,
              graph_output=False,
@@ -689,8 +692,8 @@ def train_GE(datafile,
              batch_size=20,
              k=1,
              layers_sizes=[400, 40],
-             pretraining_epochs=[8000, 800],
-             pretrain_lr=[0.0005, 0.01],
+             pretraining_epochs=[8000, 8000],
+             pretrain_lr=[0.005, 0.01],
              holdout=0.1,
              repeats=10,
              graph_output=False,
