@@ -352,7 +352,8 @@ class DBN(object):
 
         print('... getting the pretraining functions')
         print('Training set sample size %i' % train_set_x.get_value().shape[0])
-        print('Validation set sample size %i' % validation_set_x.get_value().shape[0])
+        if validation_set_x is not None:
+            print('Validation set sample size %i' % validation_set_x.get_value().shape[0])
 
         pretraining_fns, free_energy_gap_fns = self.pretraining_functions(train_set_x=train_set_x,
                                                      validation_set_x=validation_set_x,
@@ -375,8 +376,9 @@ class DBN(object):
 
         n_train_batches = idx_minibatches[-1] + 1
 
-        t_set = train_set_x.get_value(borrow=True)
-        v_set = validation_set_x.get_value(borrow=True)
+        if validation_set_x is not None:
+            t_set = train_set_x.get_value(borrow=True)
+            v_set = validation_set_x.get_value(borrow=True)
 
         # early-stopping parameters
         patience = 20000  # look as this many examples regardless
@@ -442,22 +444,23 @@ class DBN(object):
                             best_cost = current_cost
                             best_iter = iter
 
-                            # Compute the free energy gap
-                            if i == 0:
-                                input_t_set = t_set
-                                input_v_set = v_set
-                            else:
-                                input_t_set = self.get_output(
-                                                t_set[range(v_set.shape[0])], i-1)
-                                input_v_set = self.get_output(v_set, i-1)
+                            if validation_set_x is not None:
+                                # Compute the free energy gap
+                                if i == 0:
+                                    input_t_set = t_set
+                                    input_v_set = v_set
+                                else:
+                                    input_t_set = self.get_output(
+                                                    t_set[range(v_set.shape[0])], i-1)
+                                    input_v_set = self.get_output(v_set, i-1)
 
-                            free_energy_train, free_energy_test = free_energy_gap_fns[i](
-                                                input_t_set,
-                                                input_v_set)
-                            free_energy_gap = free_energy_test.mean() - free_energy_train.mean()
+                                free_energy_train, free_energy_test = free_energy_gap_fns[i](
+                                                    input_t_set,
+                                                    input_v_set)
+                                free_energy_gap = free_energy_test.mean() - free_energy_train.mean()
 
-                            print('Free energy gap (layer %i, epoch %i): ' % (i, epoch), end=' ')
-                            print(free_energy_gap)
+                                print('Free energy gap (layer %i, epoch %i): ' % (i, epoch), end=' ')
+                                print(free_energy_gap)
 
                     if patience <= iter:
                         done_looping = True
@@ -477,6 +480,8 @@ class DBN(object):
 def test(datafiles,
          datadir='data',
          batch_size=20,
+         holdout=0.1,
+         repeats=10,
          graph_output=False,
          output_folder='MDBN_run',
          rng=None):
@@ -494,13 +499,22 @@ def test(datafiles,
     #################################
 
     rna_DBN, output_RNA_t_set, output_RNA_v_set = train_RNA(datafiles['mRNA'],
-                                    graph_output=graph_output, datadir=datadir)
+                                                            holdout=holdout,
+                                                            repeats=repeats,
+                                                            graph_output=graph_output,
+                                                            datadir=datadir)
 
     ge_DBN, output_GE_t_set, output_GE_v_set = train_GE(datafiles['GE'],
-                                 graph_output=graph_output, datadir=datadir)
+                                                        holdout=holdout,
+                                                        repeats=repeats,
+                                                        graph_output=graph_output,
+                                                        datadir=datadir)
 
     me_DBN, output_ME_t_set, output_ME_v_set = train_ME(datafiles['ME'],
-                                 graph_output=graph_output, datadir=datadir)
+                                                        holdout=holdout,
+                                                        repeats=repeats,
+                                                        graph_output=graph_output,
+                                                        datadir=datadir)
 
     print('*** Training on joint layer ***')
 
@@ -634,7 +648,10 @@ def train_bottom_layer(train_set, validation_set,
                         graph_output=graph_output)
 
     output_train_set = dbn.get_output(train_set)
-    output_val_set = dbn.get_output(validation_set)
+    if validation_set is not None:
+        output_val_set = dbn.get_output(validation_set)
+    else:
+        output_val_set = None
 
     return dbn, output_train_set, output_val_set
 
@@ -642,15 +659,19 @@ def train_ME(datafile,
              clip=None,
              batch_size=20,
              k=1,
-             layers_sizes=[290, 40],
+             layers_sizes=[400, 40],
              pretraining_epochs=[8000, 800],
-             pretrain_lr=[0.01, 0.01],
+             pretrain_lr=[0.0005, 0.01],
+             holdout=0.1,
+             repeats=10,
              graph_output=False,
              datadir='data'):
     print('*** Training on ME ***')
 
     train_set, validation_set = load_n_preprocess_data(datafile,
                                                        range=clip,
+                                                       holdout=holdout,
+                                                       repeats=repeats,
                                                        transform_fn=numpy.power,
                                                        exponent=1/6,
                                                        datadir=datadir)
@@ -667,14 +688,20 @@ def train_GE(datafile,
              clip=(-5,5),
              batch_size=20,
              k=1,
-             layers_sizes=[280, 40],
+             layers_sizes=[400, 40],
              pretraining_epochs=[8000, 800],
-             pretrain_lr=[0.01, 0.01],
+             pretrain_lr=[0.0005, 0.01],
+             holdout=0.1,
+             repeats=10,
              graph_output=False,
              datadir='data'):
     print('*** Training on GE ***')
 
-    train_set, validation_set = load_n_preprocess_data(datafile, range=clip, datadir=datadir)
+    train_set, validation_set = load_n_preprocess_data(datafile,
+                                                       range=clip,
+                                                       holdout=holdout,
+                                                       repeats=repeats,
+                                                       datadir=datadir)
 
     return train_bottom_layer(train_set, validation_set,
                               batch_size=batch_size,
@@ -691,11 +718,17 @@ def train_RNA(datafile,
               layers_sizes=[40],
               pretraining_epochs=[8000],
               pretrain_lr=[0.0005],
+              holdout=0.1,
+              repeats=10,
               graph_output=False,
               datadir='data'):
     print('*** Training on RNA ***')
 
-    train_set, validation_set = load_n_preprocess_data(datafile, range=clip, datadir=datadir)
+    train_set, validation_set = load_n_preprocess_data(datafile,
+                                                       range=clip,
+                                                       holdout=holdout,
+                                                       repeats=repeats,
+                                                       datadir=datadir)
 
     return train_bottom_layer(train_set, validation_set,
                                 batch_size=batch_size,
