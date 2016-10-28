@@ -370,11 +370,7 @@ class DBN(object):
 
         n_data = train_set_x.get_value().shape[0]
 
-        idx_minibatches, minibatches = get_minibatches_idx(n_data,
-                                                           batch_size,
-                                                           shuffle=True)
-
-        n_train_batches = idx_minibatches[-1] + 1
+        n_train_batches = int(n_data / batch_size) + 1
 
         if validation_set_x is not None:
             t_set = train_set_x.get_value(borrow=True)
@@ -407,6 +403,11 @@ class DBN(object):
             done_looping = False
             while (epoch < pretraining_epochs[i]) and (not done_looping):
                 epoch = epoch + 1
+
+                idx_minibatches, minibatches = get_minibatches_idx(n_data,
+                                                                   batch_size,
+                                                                   shuffle=True)
+
                 # go through the training set
                 if not isinstance(self.rbm_layers[i], GRBM) and epoch == 6:
                     momentum = 0.9
@@ -534,8 +535,9 @@ def test(datafiles,
 
     top_DBN.pretraining(joint_train_set, joint_val_set,
                         batch_size, k=1,
-                        pretraining_epochs=[8000, 8000],
-                        pretrain_lr=[0.01, 0.01])
+                        pretraining_epochs=[1000, 1000],
+                        pretrain_lr=[0.005, 0.005],
+                        graph_output=graph_output)
 
     # Identifying the classes
 
@@ -613,9 +615,9 @@ def load_n_preprocess_data(datafile,
 
     validation_set_size = int(data.shape[0]*holdout)
 
-    # pre shuffle the data
+    # pre shuffle the data if we have a validation set
     _, indexes = get_minibatches_idx(data.shape[0], data.shape[0] -
-                                     validation_set_size, shuffle = True)
+                                     validation_set_size, shuffle = (holdout>0))
 
     train_set = theano.shared(data[indexes[0]], borrow=True)
     if validation_set_size > 0:
@@ -663,8 +665,8 @@ def train_ME(datafile,
              batch_size=20,
              k=1,
              layers_sizes=[400, 40],
-             pretraining_epochs=[8000, 8000],
-             pretrain_lr=[0.005, 0.01],
+             pretraining_epochs=[3000, 1000],
+             pretrain_lr=[0.005, 0.05],
              holdout=0.1,
              repeats=10,
              graph_output=False,
@@ -692,8 +694,8 @@ def train_GE(datafile,
              batch_size=20,
              k=1,
              layers_sizes=[400, 40],
-             pretraining_epochs=[8000, 8000],
-             pretrain_lr=[0.005, 0.01],
+             pretraining_epochs=[3000, 1000],
+             pretrain_lr=[0.005, 0.05],
              holdout=0.1,
              repeats=10,
              graph_output=False,
@@ -719,8 +721,8 @@ def train_RNA(datafile,
               batch_size=20,
               k=10,
               layers_sizes=[40],
-              pretraining_epochs=[8000],
-              pretrain_lr=[0.0005],
+              pretraining_epochs=[3000],
+              pretrain_lr=[0.001],
               holdout=0.1,
               repeats=10,
               graph_output=False,
@@ -804,7 +806,7 @@ def prepare_datafiles(datadir='data'):
 
 if __name__ == '__main__':
     datafiles = prepare_datafiles()
-    test(datafiles)
+    test(datafiles, holdout=0.0, repeats=1)
 
 #    train_RNA(datafiles['mRNA'],graph_output=True)
 #    train_GE(datafiles['GE'],graph_output=True)
