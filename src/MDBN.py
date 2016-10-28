@@ -600,12 +600,12 @@ def load_n_preprocess_data(datafile,
     if transform_fn is not None:
         data = transform_fn(data, exponent)
 
+    data = data.T
+
     data = stats.zscore(data)
 
     if range is not None:
         data = numpy.clip(data, range[0], range[1])
-
-    data = data.T
 
     # replicate the samples
     if repeats > 1:
