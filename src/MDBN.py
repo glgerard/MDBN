@@ -163,11 +163,12 @@ class DBN(object):
         :param n_outs: dimension of the output of the network
         """
 
+        self.n_ins = n_ins
         self.sigmoid_layers = []
         self.rbm_layers = []
         self.params = []
-        stacked_layers_sizes = hidden_layers_sizes + [n_outs]
-        self.n_layers = len(stacked_layers_sizes)
+        self.stacked_layers_sizes = hidden_layers_sizes + [n_outs]
+        self.n_layers = len(self.stacked_layers_sizes)
 
         assert self.n_layers > 0
 
@@ -196,7 +197,7 @@ class DBN(object):
             if i == 0:
                 input_size = n_ins
             else:
-                input_size = stacked_layers_sizes[i - 1]
+                input_size = self.stacked_layers_sizes[i - 1]
 
             # the input to this layer is either the activation of the
             # hidden layer below or the input of the DBN if you are on
@@ -210,11 +211,11 @@ class DBN(object):
                 layer_input = self.sigmoid_layers[-1].output
 
             print('Adding a layer with %i input and %i outputs' %
-                  (input_size, stacked_layers_sizes[i]))
+                  (input_size, self.stacked_layers_sizes[i]))
             sigmoid_layer = HiddenLayer(rng=numpy_rng,
                                         input=layer_input,
                                         n_in=input_size,
-                                        n_out=stacked_layers_sizes[i],
+                                        n_out=self.stacked_layers_sizes[i],
                                         activation=tensor.nnet.sigmoid)
 
             # add the layer to our list of layers
@@ -233,7 +234,7 @@ class DBN(object):
                                 theano_rng=theano_rng,
                                 input=layer_input,
                                 n_visible=input_size,
-                                n_hidden=stacked_layers_sizes[i],
+                                n_hidden=self.stacked_layers_sizes[i],
                                 W=sigmoid_layer.W,
                                 hbias=sigmoid_layer.b)
             else:
@@ -241,11 +242,14 @@ class DBN(object):
                                 theano_rng=theano_rng,
                                 input=layer_input,
                                 n_visible=input_size,
-                                n_hidden=stacked_layers_sizes[i],
+                                n_hidden=self.stacked_layers_sizes[i],
                                 W=sigmoid_layer.W,
                                 hbias=sigmoid_layer.b)
 
             self.rbm_layers.append(rbm_layer)
+
+    def number_of_nodes(self):
+        return [self.n_ins] + self.stacked_layers_sizes
 
     def inspect_inputs(self, i, node, fn):
         print(i, node, "input(s) value(s):", [input[0] for input in fn.inputs],
@@ -553,14 +557,37 @@ def test(datafiles,
         os.makedirs(output_folder)
     os.chdir(output_folder)
 
-    numpy.savez('parameters_at_gaussian_layer_RNA.npz',
-             k=20,
-             epoch=8000,
-             batch_size=10,
-             learning_rate=0.0005,
-             stocastic_steps=False,
-             momentum=False,
-             weight_cost=False,
+    numpy.savez('parameters_and_classes.npz',
+             holdout=holdout,
+             repeats=repeats,
+             rna_config={
+                         'number_of_nodes': rna_DBN.number_of_nodes(),
+                         'epochs': [3000],
+                         'learning_rate': [0.001],
+                         'batch_size': 20,
+                         'k': 10
+                        },
+             ge_config={
+                        'number_of_nodes': ge_DBN.number_of_nodes(),
+                        'epochs': [3000, 1000],
+                        'learning_rate': [0.005, 0.05],
+                        'batch_size': 20,
+                        'k': 1
+                        },
+             me_config={
+                        'number_of_nodes': me_DBN.number_of_nodes(),
+                        'epochs': [3000, 1000],
+                        'learning_rate': [0.005, 0.05],
+                        'batch_size': 20,
+                        'k': 1
+                },
+             top_config={
+                        'number_of_nodes': top_DBN.number_of_nodes(),
+                        'epochs': [1000, 1000],
+                        'learning_rate': [0.005, 0.005],
+                        'batch_size': 20,
+                        'k': 1
+                        },
              classes=classes,
              rna_params=[{p.name: p.get_value()} for p in rna_DBN.params],
              ge_params=[{p.name: p.get_value()} for p in ge_DBN.params],
