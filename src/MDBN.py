@@ -27,6 +27,7 @@ All rights reserved.
 from __future__ import print_function, division
 
 import timeit
+import datetime
 import sys
 import os
 import zipfile
@@ -43,6 +44,7 @@ from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 
 from scipy import stats
 from utils import get_minibatches_idx
+from utils import remap_class
 from rbm import RBM
 from rbm import GRBM
 
@@ -482,14 +484,15 @@ class DBN(object):
 
 # batch_size changed from 1 as in M.Liang to 20
 
-def test(datafiles,
-         datadir='data',
-         batch_size=20,
-         holdout=0.1,
-         repeats=10,
-         graph_output=False,
-         output_folder='MDBN_run',
-         rng=None):
+def train_MDBN(datafiles,
+               datadir='data',
+               batch_size=20,
+               holdout=0.1,
+               repeats=10,
+               graph_output=False,
+               output_folder='MDBN_run',
+               output_file='parameters_and_classes.npz',
+               rng=None):
     """
     :param datafile: path to the dataset
 
@@ -557,7 +560,7 @@ def test(datafiles,
         os.makedirs(output_folder)
     os.chdir(output_folder)
 
-    numpy.savez('parameters_and_classes.npz',
+    numpy.savez(output_file,
              holdout=holdout,
              repeats=repeats,
              rna_config={
@@ -596,6 +599,8 @@ def test(datafiles,
              )
 
     os.chdir('..')
+
+    return classes
 
 def importdata(file, datadir):
     root_dir = os.getcwd()
@@ -833,7 +838,28 @@ def prepare_datafiles(datadir='data'):
 
 if __name__ == '__main__':
     datafiles = prepare_datafiles()
-    test(datafiles, holdout=0.0, repeats=1)
+
+    output_dir = 'MDBN_run'
+    run_start_date = datetime.datetime.now()
+    run_start_date_str = run_start_date.strftime("%Y-%m-%d_%H%M")
+    results = []
+    for i in range(2):
+        classified_samples = train_MDBN(datafiles,
+                                        output_folder=output_dir,
+                                        output_file='Exp_%s_run_%d.npz' %
+                                                               (run_start_date, i),
+                                        holdout=0.0, repeats=1)
+        results.append(remap_class(classified_samples,8))
+
+    current_date_time = datetime.datetime.now()
+    print('*** Run started at %s' % run_start_date.strftime("%H:%M:%S on %B %d, %Y"))
+    print('*** Run completed at %s' % current_date_time.strftime("%H:%M:%S on %B %d, %Y"))
+
+    root_dir = os.getcwd()
+    os.chdir(output_dir)
+    numpy.savez('Results_%s.npz' % run_start_date,
+                results=results)
+    os.chdir(root_dir)
 
 #    train_RNA(datafiles['mRNA'],graph_output=True)
 #    train_GE(datafiles['GE'],graph_output=True)

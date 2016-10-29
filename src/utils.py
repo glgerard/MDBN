@@ -105,9 +105,3 @@ def remap_class(dbn_output, n_classes):
 
     new_classification = merge_classes(map=map,D=distance_matrix,n_classes=n_classes)
     return numpy.array([new_classification[i] for i in classified_samples])
-
-if __name__ == 'main':
-    a = numpy.random.randint(0,20,350)
-    b = numpy.random.randint(0,2,(20,8))
-
-    ap = remap_class(a,b,n_classes=8)
