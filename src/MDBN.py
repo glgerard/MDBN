@@ -844,12 +844,13 @@ if __name__ == '__main__':
     run_start_date_str = run_start_date.strftime("%Y-%m-%d_%H%M")
     results = []
     for i in range(2):
-        classified_samples = train_MDBN(datafiles,
-                                        output_folder=output_dir,
-                                        output_file='Exp_%s_run_%d.npz' %
+        dbn_output = train_MDBN(datafiles,
+                                output_folder=output_dir,
+                                output_file='Exp_%s_run_%d.npz' %
                                                                (run_start_date_str, i),
-                                        holdout=0.0, repeats=1)
-        results.append(remap_class(classified_samples,8))
+                                holdout=0.0, repeats=1)
+        classified_samples = (dbn_output > 0.5) * numpy.ones_like(dbn_output)
+        results.append(remap_class(classified_samples, 8))
 
     current_date_time = datetime.datetime.now()
     print('*** Run started at %s' % run_start_date.strftime("%H:%M:%S on %B %d, %Y"))
