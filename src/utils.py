@@ -55,7 +55,7 @@ def get_minibatches_idx(n, batch_size, shuffle=False):
 
 def remap_class(dbn_output, n_classes):
     def class_by_frequency(a):
-        classes = range(numpy.max(a) + 1)
+        classes = range(int(numpy.max(a)) + 1)
         frequency = [numpy.sum(a == idx) for idx in classes]
         idx_sort0 = reversed(numpy.argsort(frequency).tolist())
         idx_sort1 = reversed(numpy.argsort(frequency).tolist())

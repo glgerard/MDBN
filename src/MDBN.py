@@ -847,7 +847,7 @@ if __name__ == '__main__':
         classified_samples = train_MDBN(datafiles,
                                         output_folder=output_dir,
                                         output_file='Exp_%s_run_%d.npz' %
-                                                               (run_start_date, i),
+                                                               (run_start_date_str, i),
                                         holdout=0.0, repeats=1)
         results.append(remap_class(classified_samples,8))
 
