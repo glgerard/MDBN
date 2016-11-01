@@ -256,6 +256,7 @@ class RBM(object):
                 pre_sigmoid_v1, v1_mean, v1_sample]
 
     def get_cost_updates(self, lr=0.1, k=1,
+                         lambda_1=0.0,
                          lambda_2=0.0,
                          weightcost = 0.0,
                          batch_size=None, persistent=None):
@@ -343,17 +344,16 @@ class RBM(object):
             # We must not compute the gradient through the gibbs sampling
             gradients = tensor.grad(cost, self.params, consider_constant=[chain_end])
 
-# ISSUE: it returns Inf when Wij is small
-#        gparams[0] = gparams[0] / (1 + 2 * tensor.cast(lr * lambda_1, dtype=theano.config.floatX) / \
-#                                    tensor.abs_(self.W))
+        epsilon = 0.001
+        # ISSUE: it returns Inf when Wij is small
+        gradients[0] = gradients[0] / tensor.cast(1 + 2 * lr * lambda_1 / (tensor.abs_(self.W)+epsilon),
+                                                   dtype=theano.config.floatX)
 
         # constructs the update dictionary
         multipliers = [
-            (1 - 2 * lr * lambda_2),
-            # Issue: it returns Inf when Wij is small
-            #           (1 - 2 * tensor.cast(lr * lambda_2, dtype=theano.config.floatX)) / \
-            #           (1 + 2 * tensor.cast(lr * lambda_1, dtype=theano.config.floatX) / \
-            #            tensor.abs_(self.W)),
+            # (1 - 2 * lr * lambda_2),
+            # Issue: it returns Inf when Wij is small, therefore a small constant is added
+            (1 - 2 * lr * lambda_2) / (1 + 2 * lr * lambda_1 / (tensor.abs_(self.W) + epsilon)),
             1,1]
 
         for gradient, param, multiplier, param_speed in zip(gradients, self.params,
@@ -663,12 +663,14 @@ class GRBM(RBM):
                  learning_rate=0.01, k=1,
                  initial_momentum = 0.0, final_momentum = 0.0,
                  weightcost = 0.0,
+                 lambda_1 = 0.0,
                  lambda_2 = 0.1,
                  persistent = False,
                  display_fn=None, graph_output=False):
 
         cost, updates = self.get_cost_updates(lr=learning_rate,
                                               k=k,
+                                              lambda_1=lambda_1,
                                               lambda_2=lambda_2,
                                               weightcost=weightcost,
                                               batch_size=batch_size

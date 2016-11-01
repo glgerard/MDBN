@@ -37,6 +37,11 @@ def display_weights(W, nRows=5, nCols=8, dimX = 20, dimY = 40 ):
                                   normPatch * 255
    plt.imshow(tiled)
 
+def display_sample(X, dimX=20, dimY=40, cmap='gray'):
+    y = np.zeros(dimX * dimY)
+    y[:X.shape[0] - dimX*dimY] = X
+    plt.imshow(y.reshape(dimX,dimY),cmap=cmap)
+
 def plotit(values):
     plt.hist(values);
     plt.title('mm = %g' % np.mean(np.fabs(values)))
@@ -58,7 +63,7 @@ def run(datafile, training_fn):
  with a 3D Example" Yosinski 2010
 """
 if __name__ == '__main__':
-    datafiles = MDBN.prepare_datafiles()
+    datafiles = MDBN.prepare_TCGA_datafiles()
     hbias, vbias, W = run(datafiles['GE'],MDBN.train_GE)
 
     plt.close(1)

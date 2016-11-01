@@ -26,6 +26,46 @@ All rights reserved.
 
 import numpy
 from scipy.spatial import distance
+import os
+import zipfile
+import urllib
+
+def prepare_TCGA_datafiles(datadir='data'):
+    base_url = 'http://nar.oxfordjournals.org/content/suppl/2012/07/25/gks725.DC1/'
+    archive = 'nar-00961-n-2012-File005.zip'
+    datafiles = {
+        'GE': 'TCGA_Data/3.GE1_0.5.out',
+        'ME': 'TCGA_Data/3.Methylation_0.5.out',
+        'mRNA': 'TCGA_Data/3.miRNA_0.5.out'
+    }
+    if not os.path.isdir(datadir):
+        os.mkdir(datadir)
+    root_dir = os.getcwd()
+    os.chdir(datadir)
+    for name, datafile in datafiles.iteritems():
+        if not os.path.isfile(datafile):
+            if not os.path.isfile(archive):
+                print('Downloading TCGA_Data from ' + base_url)
+                testfile = urllib.URLopener()
+                testfile.retrieve(base_url + archive, archive)
+            zipfile.ZipFile(archive, 'r').extract(datafile)
+    os.chdir(root_dir)
+    return datafiles
+
+def import_TCGA_data(file, datadir, dtype):
+    root_dir = os.getcwd()
+    os.chdir(datadir)
+    with open(file) as f:
+        ncols = len(f.readline().split('\t'))
+
+    data = numpy.loadtxt(file,
+                       dtype=dtype,
+                       delimiter='\t',
+                       skiprows=1,
+                       usecols=range(1,ncols))
+
+    os.chdir(root_dir)
+    return (data.shape[1], ncols-1, data)
 
 def get_minibatches_idx(n, batch_size, shuffle=False):
     """
@@ -53,7 +93,7 @@ def get_minibatches_idx(n, batch_size, shuffle=False):
 # The following function help reduce the number of classes based on highest
 # frequency and lowest Hamming distance
 
-def remap_class(dbn_output, n_classes):
+def remap_class(classified_samples, distance_matrix, n_classes):
     def class_by_frequency(a):
         classes = range(int(numpy.max(a)) + 1)
         frequency = [numpy.sum(a == idx) for idx in classes]
@@ -79,22 +119,6 @@ def remap_class(dbn_output, n_classes):
 
         return new_map
 
-    # Find the unique node patterns present in the output
-    tmp = numpy.ascontiguousarray(dbn_output).view(numpy.dtype(
-        (numpy.void, dbn_output.dtype.itemsize * dbn_output.shape[1])))
-    _, idx = numpy.unique(tmp, return_index=True)
-    class_representation = dbn_output[idx]
-
-    # Find the Hamming distances among all the classes
-    distance_matrix = distance.cdist(class_representation,class_representation,metric='hamming')
-
-    # Assign each sample to a class
-    classified_samples = numpy.zeros((dbn_output.shape[0]))
-    output_nodes = dbn_output.shape[1]
-    for idx, pattern in enumerate(class_representation):
-        classified_samples = classified_samples + \
-                             (numpy.sum(dbn_output == pattern, axis=1) == output_nodes) * idx
-
     # Order the classes by frequency and create an ordered list of those
     map = class_by_frequency(classified_samples)
 
@@ -105,3 +129,21 @@ def remap_class(dbn_output, n_classes):
 
     new_classification = merge_classes(map=map,D=distance_matrix,n_classes=n_classes)
     return numpy.array([new_classification[i] for i in classified_samples])
+
+
+def find_unique_classes(dbn_output):
+    # Find the unique node patterns present in the output
+    tmp = numpy.ascontiguousarray(dbn_output).view(numpy.dtype(
+        (numpy.void, dbn_output.dtype.itemsize * dbn_output.shape[1])))
+    _, idx = numpy.unique(tmp, return_index=True)
+    class_representation = dbn_output[idx]
+    # Find the Hamming distances among all the classes
+    distance_matrix = distance.cdist(class_representation, class_representation, metric='hamming')
+    # Assign each sample to a class
+    classified_samples = numpy.zeros((dbn_output.shape[0]))
+    output_nodes = dbn_output.shape[1]
+    for idx, pattern in enumerate(class_representation):
+        classified_samples = classified_samples + \
+                             (numpy.sum(dbn_output == pattern, axis=1) == output_nodes) * idx
+
+    return classified_samples, distance_matrix
