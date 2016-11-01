@@ -137,9 +137,10 @@ class DBN(object):
     network, and the hidden layer of the last RBM represents the output.
     """
 
-    def __init__(self, numpy_rng, theano_rng=None, input=None, n_ins=784,
+    def __init__(self, numpy_rng=None, theano_rng=None, input=None, n_ins=784,
                  gauss=True,
-                 hidden_layers_sizes=[400], n_outs=40):
+                 hidden_layers_sizes=[400], n_outs=40,
+                 W_list=None, b_list=None):
         """This class is made to support a variable number of layers.
 
         Originally from: http://deeplearning.net/tutorial/code/DBN.py
@@ -176,7 +177,10 @@ class DBN(object):
 
         assert self.n_layers > 0
 
-        if not theano_rng:
+        if numpy_rng is None:
+            numpy_rng = numpy.random.RandomState(123)
+
+        if theano_rng is None:
             theano_rng = RandomStreams(numpy_rng.randint(2 ** 30))
 
         # allocate symbolic variables for the data
@@ -220,16 +224,26 @@ class DBN(object):
             print('Adding a layer with %i input and %i outputs' %
                   (n_in, n_out))
 
-            W = numpy.asarray(numpy_rng.uniform(
+            if W_list is None:
+                W = numpy.asarray(numpy_rng.uniform(
                                 low=-4.*numpy.sqrt(6. / (n_in + n_out)),
                                 high=4.*numpy.sqrt(6. / (n_in + n_out)),
                                 size=(n_in, n_out)
                              ),dtype=theano.config.floatX)
+            else:
+                W = W_list[i]
+
+            if b_list is None:
+                b = numpy.zeros((n_out,), dtype=theano.config.floatX)
+            else:
+                b = b_list[i]
+
             sigmoid_layer = HiddenLayer(rng=numpy_rng,
                                         input=layer_input,
                                         n_in=n_in,
                                         n_out=n_out,
                                         W=theano.shared(W,name='W',borrow=True),
+                                        b=theano.shared(b,name='b',borrow=True),
                                         activation=tensor.nnet.sigmoid)
 
             # add the layer to our list of layers
@@ -555,7 +569,6 @@ def train_MDBN(datafiles,
 
     print('*** Training on joint layer ***')
 
-
     output_RNA_t_set, output_RNA_v_set = output_DBN(rna_DBN,datafiles['mRNA'],holdout=holdout,repeats=repeats)
     output_GE_t_set, output_GE_v_set = output_DBN(ge_DBN,datafiles['GE'], holdout=holdout, repeats=repeats)
     output_ME_t_set, output_ME_v_set = output_DBN(me_DBN,datafiles['ME'], holdout=holdout, repeats=repeats)
@@ -569,16 +582,7 @@ def train_MDBN(datafiles,
     else:
         joint_val_set = None
 
-    top_DBN = DBN(numpy_rng=rng, n_ins=120,
-                  gauss=False,
-                  hidden_layers_sizes=[24],
-                  n_outs=8)
-
-    top_DBN.pretraining(joint_train_set, joint_val_set,
-                        batch_size, k=1,
-                        pretraining_epochs=[2400, 800],
-                        pretrain_lr=[0.1, 0.1],
-                        graph_output=graph_output)
+    top_DBN = train_top(batch_size, graph_output, joint_train_set, joint_val_set, rng)
 
     # Identifying the classes
 
@@ -590,51 +594,101 @@ def train_MDBN(datafiles,
 
     classes = top_DBN.get_output(joint_output)
 
-    if not os.path.isdir(output_folder):
-        os.makedirs(output_folder)
-    os.chdir(output_folder)
-
-    numpy.savez(output_file,
-             holdout=holdout,
-             repeats=repeats,
-             rna_config={
-                         'number_of_nodes': rna_DBN.number_of_nodes(),
-                         'epochs': [8000],
-                         'learning_rate': [0.005],
-                         'batch_size': 20,
-                         'k': 10
-                        },
-             ge_config={
-                        'number_of_nodes': ge_DBN.number_of_nodes(),
-                        'epochs': [8000, 8000],
-                        'learning_rate': [0.005, 0.1],
-                        'batch_size': 20,
-                        'k': 1
-                        },
-             me_config={
-                        'number_of_nodes': me_DBN.number_of_nodes(),
-                        'epochs': [8000, 8000],
-                        'learning_rate': [0.005, 0.1],
-                        'batch_size': 20,
-                        'k': 1
-                },
-             top_config={
-                        'number_of_nodes': top_DBN.number_of_nodes(),
-                        'epochs': [2400, 800],
-                        'learning_rate': [0.1, 0.1],
-                        'batch_size': 20,
-                        'k': 1
-                        },
-             classes=classes,
-             rna_params=[{p.name: p.get_value()} for p in rna_DBN.params],
-             ge_params=[{p.name: p.get_value()} for p in ge_DBN.params],
-             me_params=[{p.name: p.get_value()} for p in me_DBN.params],
-             top_params=[{p.name: p.get_value()} for p in top_DBN.params]
-             )
-
-    os.chdir('..')
+    save_network(classes, ge_DBN, holdout, me_DBN, output_file, output_folder, repeats, rna_DBN, top_DBN)
 
     return classes
+
+def save_network(classes, ge_DBN, holdout, me_DBN, output_file, output_folder, repeats, rna_DBN, top_DBN):
+    if not os.path.isdir(output_folder):
+        os.makedirs(output_folder)
+    root_dir = os.getcwd()
+    os.chdir(output_folder)
+    numpy.savez(output_file,
+                holdout=holdout,
+                repeats=repeats,
+                rna_config={
+                    'number_of_nodes': rna_DBN.number_of_nodes(),
+                    'epochs': [8000],
+                    'learning_rate': [0.005],
+                    'batch_size': 20,
+                    'k': 10
+                },
+                ge_config={
+                    'number_of_nodes': ge_DBN.number_of_nodes(),
+                    'epochs': [8000, 8000],
+                    'learning_rate': [0.005, 0.1],
+                    'batch_size': 20,
+                    'k': 1
+                },
+                me_config={
+                    'number_of_nodes': me_DBN.number_of_nodes(),
+                    'epochs': [8000, 8000],
+                    'learning_rate': [0.005, 0.1],
+                    'batch_size': 20,
+                    'k': 1
+                },
+                top_config={
+                    'number_of_nodes': top_DBN.number_of_nodes(),
+                    'epochs': [4000, 4000],
+                    'learning_rate': [0.1, 0.1],
+                    'batch_size': 20,
+                    'k': 1
+                },
+                classes=classes,
+                rna_params=[{p.name: p.get_value()} for p in rna_DBN.params],
+                ge_params=[{p.name: p.get_value()} for p in ge_DBN.params],
+                me_params=[{p.name: p.get_value()} for p in me_DBN.params],
+                top_params=[{p.name: p.get_value()} for p in top_DBN.params]
+                )
+    os.chdir(root_dir)
+
+def load_network(input_file, input_folder):
+    root_dir = os.getcwd()
+    # TODO: check if the input_folder exists
+    os.chdir(input_folder)
+    npz = numpy.load(input_file)
+
+    config = npz['rna_config'].tolist()
+    params = npz['rna_params']
+    layer_sizes = config['number_of_nodes']
+    rna_DBN = DBN(n_ins=layer_sizes[0], hidden_layers_sizes=layer_sizes[1:-1], n_outs=layer_sizes[-1],
+                  W_list=[params[0]['W']],b_list=[params[1]['b']])
+
+    config = npz['ge_config'].tolist()
+    params = npz['ge_params']
+    layer_sizes = config['number_of_nodes']
+    ge_DBN = DBN(n_ins=layer_sizes[0], hidden_layers_sizes=layer_sizes[1:-1], n_outs=layer_sizes[-1],
+                  W_list=[params[0]['W'],params[2]['W']],b_list=[params[1]['b'],params[3]['b']])
+
+    config = npz['me_config'].tolist()
+    params = npz['me_params']
+    layer_sizes = config['number_of_nodes']
+    me_DBN = DBN(n_ins=layer_sizes[0], hidden_layers_sizes=layer_sizes[1:-1], n_outs=layer_sizes[-1],
+                  W_list=[params[0]['W'],params[2]['W']],b_list=[params[1]['b'],params[3]['b']])
+
+    config = npz['top_config'].tolist()
+    params = npz['top_params']
+    layer_sizes = config['number_of_nodes']
+    top_DBN = DBN(n_ins=layer_sizes[0], hidden_layers_sizes=layer_sizes[1:-1], n_outs=layer_sizes[-1],
+                  gauss=False,
+                  W_list=[params[0]['W'],params[2]['W']],b_list=[params[1]['b'],params[3]['b']])
+
+    os.chdir(root_dir)
+
+    return (rna_DBN, ge_DBN, me_DBN, top_DBN)
+
+def train_top(batch_size, graph_output, joint_train_set, joint_val_set, rng):
+    top_DBN = DBN(numpy_rng=rng, n_ins=120,
+                  gauss=False,
+                  hidden_layers_sizes=[24],
+                  n_outs=8)
+    top_DBN.pretraining(joint_train_set, joint_val_set,
+                        batch_size, k=1,
+                        pretraining_epochs=[4000, 4000],
+                        pretrain_lr=[0.1, 0.1],
+                        graph_output=graph_output)
+    return top_DBN
+
 
 def train_bottom_layer(train_set, validation_set,
                        batch_size=20,
