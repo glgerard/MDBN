@@ -415,7 +415,7 @@ class DBN(object):
             v_set = validation_set_x.get_value(borrow=True)
 
         # early-stopping parameters
-        patience = 80000  # look as this many examples regardless
+
         patience_increase = 2  # wait this much longer when a new best is
         # found
         improvement_threshold = 0.995  # a relative improvement of this much is
@@ -432,9 +432,6 @@ class DBN(object):
 
         n_train_batches = idx_minibatches[-1] + 1
 
-        validation_frequency = min(20*n_train_batches, patience // 2)
-        print('Validation frequency: %d' % validation_frequency)
-
         for i in range(self.n_layers):
             if graph_output:
                 plt.figure(i+1)
@@ -448,8 +445,17 @@ class DBN(object):
             best_cost = numpy.inf
             epoch = 0
             done_looping = False
+
+            patience = pretraining_epochs[i]  # look as this many examples regardless
+            validation_frequency = min(20 * n_train_batches, patience // 2)
+            print('Validation frequency: %d' % validation_frequency)
+
             while (epoch < pretraining_epochs[i]) and (not done_looping):
                 epoch = epoch + 1
+
+                idx_minibatches, minibatches = get_minibatches_idx(n_data,
+                                                                   batch_size,
+                                                                   shuffle=True)
 
                 # go through the training set
                 if not isinstance(self.rbm_layers[i], GRBM) and epoch == 6:
@@ -615,21 +621,21 @@ def save_network(classes, ge_DBN, holdout, me_DBN, output_file, output_folder, r
                 },
                 ge_config={
                     'number_of_nodes': ge_DBN.number_of_nodes(),
-                    'epochs': [8000, 8000],
+                    'epochs': [8000, 800],
                     'learning_rate': [0.005, 0.1],
                     'batch_size': 20,
                     'k': 1
                 },
                 me_config={
                     'number_of_nodes': me_DBN.number_of_nodes(),
-                    'epochs': [8000, 8000],
+                    'epochs': [8000, 800],
                     'learning_rate': [0.005, 0.1],
                     'batch_size': 20,
                     'k': 1
                 },
                 top_config={
                     'number_of_nodes': top_DBN.number_of_nodes(),
-                    'epochs': [4000, 4000],
+                    'epochs': [800, 800],
                     'learning_rate': [0.1, 0.1],
                     'batch_size': 20,
                     'k': 1
@@ -681,10 +687,10 @@ def train_top(batch_size, graph_output, joint_train_set, joint_val_set, rng):
     top_DBN = DBN(numpy_rng=rng, n_ins=120,
                   gauss=False,
                   hidden_layers_sizes=[24],
-                  n_outs=8)
+                  n_outs=3)
     top_DBN.pretraining(joint_train_set, joint_val_set,
                         batch_size, k=1,
-                        pretraining_epochs=[4000, 4000],
+                        pretraining_epochs=[800, 800],
                         pretrain_lr=[0.1, 0.1],
                         graph_output=graph_output)
     return top_DBN
@@ -734,7 +740,7 @@ def train_ME(datafile,
              lambda_1=0,
              lambda_2=1,
              layers_sizes=[400, 40],
-             pretraining_epochs=[8000, 8000],
+             pretraining_epochs=[8000, 800],
              pretrain_lr=[0.005, 0.1],
              holdout=0.1,
              repeats=10,
@@ -767,7 +773,7 @@ def train_GE(datafile,
              lambda_1=0,
              lambda_2=1,
              layers_sizes=[400, 40],
-             pretraining_epochs=[8000, 8000],
+             pretraining_epochs=[8000, 800],
              pretrain_lr=[0.005, 0.1],
              holdout=0.1,
              repeats=10,
@@ -798,7 +804,7 @@ def train_RNA(datafile,
               lambda_1=0.0,
               lambda_2=0.1,
               layers_sizes=[40],
-              pretraining_epochs=[8000],
+              pretraining_epochs=[80000],
               pretrain_lr=[0.005],
               holdout=0.1,
               repeats=10,
@@ -913,7 +919,7 @@ if __name__ == '__main__':
     run_start_date = datetime.datetime.now()
     run_start_date_str = run_start_date.strftime("%Y-%m-%d_%H%M")
     results = []
-    for i in range(2):
+    for i in range(1):
         dbn_output = train_MDBN(datafiles,
                                 output_folder=output_dir,
                                 output_file='Exp_%s_run_%d.npz' %
