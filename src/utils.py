@@ -88,7 +88,8 @@ def load_n_preprocess_data(datafile,
         data = transform_fn(data, exponent)
 
     zdata = stats.zscore(data,axis=1)
-    zdata = zdata.T
+    zdata1 = zdata[~numpy.isnan(zdata).any(axis=1)]
+    zdata = zdata1.T
 
     if clip is not None:
         zdata = numpy.clip(zdata, clip[0], clip[1])

@@ -540,7 +540,7 @@ class DBN(object):
         return (self.get_output(train_set), self.get_output(validation_set))
 
 def train_top(batch_size, graph_output, joint_train_set, joint_val_set, rng):
-    top_DBN = DBN(numpy_rng=rng, n_ins=120,
+    top_DBN = DBN(numpy_rng=rng, n_ins=joint_train_set.get_value().shape[1],
                   gauss=False,
                   hidden_layers_sizes=[24],
                   n_outs=3)

@@ -13,15 +13,15 @@ from utils import load_n_preprocess_data
 
 # batch_size changed from 1 as in M.Liang to 20
 
-def train_MDBN(datafiles,
-               datadir='data',
-               batch_size=20,
-               holdout=0.1,
-               repeats=10,
-               graph_output=False,
-               output_folder='MDBN_run',
-               output_file='parameters_and_classes.npz',
-               rng=None):
+def train_AML_MDBN(datafiles,
+                   datadir='data',
+                   batch_size=20,
+                   holdout=0.1,
+                   repeats=10,
+                   graph_output=False,
+                   output_folder='MDBN_run',
+                   output_file='parameters_and_classes.npz',
+                   rng=None):
     """
     :param datafile: path to the dataset
 
@@ -134,7 +134,7 @@ def save_network(classes, ge_DBN, me_DBN, dm_DBN, top_DBN, holdout, output_file,
                 classes=classes,
                 me_params=[{p.name: p.get_value()} for p in me_DBN.params],
                 ge_params=[{p.name: p.get_value()} for p in ge_DBN.params],
-                dm_params=[{p.name: p.get_value()} for p in dm_DBN.params],
+#                dm_params=[{p.name: p.get_value()} for p in dm_DBN.params],
                 top_params=[{p.name: p.get_value()} for p in top_DBN.params]
                 )
     os.chdir(root_dir)
@@ -287,11 +287,11 @@ if __name__ == '__main__':
     run_start_date_str = run_start_date.strftime("%Y-%m-%d_%H%M")
     results = []
     for i in range(1):
-        dbn_output = train_MDBN(datafiles,
-                                output_folder=output_dir,
-                                output_file='Exp_%s_run_%d.npz' %
+        dbn_output = train_AML_MDBN(datafiles,
+                                    output_folder=output_dir,
+                                    output_file='Exp_%s_run_%d.npz' %
                                                                (run_start_date_str, i),
-                                holdout=0.0, repeats=1)
+                                    holdout=0.0, repeats=1)
         results.append(find_unique_classes((dbn_output > 0.5) * numpy.ones_like(dbn_output)))
 
     current_date_time = datetime.datetime.now()
