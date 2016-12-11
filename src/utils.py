@@ -27,30 +27,8 @@ All rights reserved.
 import numpy
 from scipy.spatial import distance
 import os
-import zipfile
-import urllib
-
-def prepare_TCGA_datafiles(datadir='data'):
-    base_url = 'http://nar.oxfordjournals.org/content/suppl/2012/07/25/gks725.DC1/'
-    archive = 'nar-00961-n-2012-File005.zip'
-    datafiles = {
-        'GE': 'TCGA_Data/3.GE1_0.5.out',
-        'ME': 'TCGA_Data/3.Methylation_0.5.out',
-        'mRNA': 'TCGA_Data/3.miRNA_0.5.out'
-    }
-    if not os.path.isdir(datadir):
-        os.mkdir(datadir)
-    root_dir = os.getcwd()
-    os.chdir(datadir)
-    for name, datafile in datafiles.iteritems():
-        if not os.path.isfile(datafile):
-            if not os.path.isfile(archive):
-                print('Downloading TCGA_Data from ' + base_url)
-                testfile = urllib.URLopener()
-                testfile.retrieve(base_url + archive, archive)
-            zipfile.ZipFile(archive, 'r').extract(datafile)
-    os.chdir(root_dir)
-    return datafiles
+from scipy import stats
+import theano
 
 def import_TCGA_data(file, datadir, dtype):
     root_dir = os.getcwd()
@@ -89,6 +67,49 @@ def get_minibatches_idx(n, batch_size, shuffle=False):
         minibatches.append(idx_list[minibatch_start:])
 
     return range(len(minibatches)), minibatches
+
+def load_n_preprocess_data(datafile,
+                           dtype=theano.config.floatX,
+                           holdout=0.1,
+                           clip=None,
+                           transform_fn=None,
+                           exponent=1.0,
+                           repeats=10,
+                           shuffle=True,
+                           datadir='data'):
+    # Load the data, each column is a single person
+    # Pass to a row representation, i.e. the data for each person is now on a
+    # single row.
+    # Normalize the data so that each measurement on our population has zero
+    # mean and zero variance
+    n_data, n_cols, data = import_TCGA_data(datafile, datadir, dtype)
+
+    if transform_fn is not None:
+        data = transform_fn(data, exponent)
+
+    zdata = stats.zscore(data,axis=1)
+    zdata = zdata.T
+
+    if clip is not None:
+        zdata = numpy.clip(zdata, clip[0], clip[1])
+
+    # replicate the samples
+    if repeats > 1:
+        zdata = numpy.repeat(zdata, repeats=repeats, axis=0)
+
+    validation_set_size = int(n_cols*holdout)
+
+    # pre shuffle the data if we have a validation set
+    _, indexes = get_minibatches_idx(n_cols, n_cols -
+                                     validation_set_size, shuffle = shuffle)
+
+    train_set = theano.shared(zdata[indexes[0]], borrow=True)
+    if validation_set_size > 0:
+        validation_set = theano.shared(zdata[indexes[1]], borrow=True)
+    else:
+        validation_set = None
+
+    return train_set, validation_set
 
 # The following function help reduce the number of classes based on highest
 # frequency and lowest Hamming distance

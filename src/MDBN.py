@@ -27,7 +27,6 @@ All rights reserved.
 from __future__ import print_function, division
 
 import timeit
-import datetime
 import sys
 import os
 
@@ -40,12 +39,8 @@ from theano import tensor
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 #from theano.compile.nanguardmode import NanGuardMode
 
-from scipy import stats
-
 from utils import get_minibatches_idx
-from utils import find_unique_classes
-from utils import prepare_TCGA_datafiles
-from utils import import_TCGA_data
+from utils import load_n_preprocess_data
 
 from rbm import RBM
 from rbm import GRBM
@@ -525,163 +520,24 @@ class DBN(object):
         print('The pretraining code for file ' + os.path.split(__file__)[1] +
               ' ran for %.2fm' % ((end_time - start_time) / 60.), file=sys.stderr)
 
-# batch_size changed from 1 as in M.Liang to 20
+    def MLP_output_from_datafile(self,
+                                 datafile,
+                                 holdout=0.0,
+                                 repeats=1,
+                                 clip=None,
+                                 transform_fn=None,
+                                 exponent=1.0,
+                                 datadir='data'):
+        train_set, validation_set = load_n_preprocess_data(datafile,
+                                                           holdout=holdout,
+                                                           clip=clip,
+                                                           transform_fn=transform_fn,
+                                                           exponent=exponent,
+                                                           repeats=repeats,
+                                                           shuffle=False,
+                                                           datadir=datadir)
 
-def train_MDBN(datafiles,
-               datadir='data',
-               batch_size=20,
-               holdout=0.1,
-               repeats=10,
-               graph_output=False,
-               output_folder='MDBN_run',
-               output_file='parameters_and_classes.npz',
-               rng=None):
-    """
-    :param datafile: path to the dataset
-
-    :param batch_size: size of a batch used to train the RBM
-    """
-
-    if rng is None:
-        rng = numpy.random.RandomState(123)
-
-    #################################
-    #     Training the RBM          #
-    #################################
-
-    rna_DBN, output_RNA_t_set, output_RNA_v_set = train_RNA(datafiles['mRNA'],
-                                                            holdout=holdout,
-                                                            repeats=repeats,
-                                                            lambda_1=0.01,
-                                                            lambda_2=0.01,
-                                                            graph_output=graph_output,
-                                                            datadir=datadir)
-
-    ge_DBN, output_GE_t_set, output_GE_v_set = train_GE(datafiles['GE'],
-                                                        holdout=holdout,
-                                                        repeats=repeats,
-                                                        lambda_1=0.01,
-                                                        lambda_2=0.1,
-                                                        graph_output=graph_output,
-                                                        datadir=datadir)
-
-    me_DBN, output_ME_t_set, output_ME_v_set = train_ME(datafiles['ME'],
-                                                        holdout=holdout,
-                                                        repeats=repeats,
-                                                        lambda_1=0.01,
-                                                        lambda_2=0.1,
-                                                        graph_output=graph_output,
-                                                        datadir=datadir)
-
-    print('*** Training on joint layer ***')
-
-    output_RNA_t_set, output_RNA_v_set = output_DBN(rna_DBN,datafiles['mRNA'],holdout=holdout,repeats=repeats)
-    output_GE_t_set, output_GE_v_set = output_DBN(ge_DBN,datafiles['GE'], holdout=holdout, repeats=repeats)
-    output_ME_t_set, output_ME_v_set = output_DBN(me_DBN,datafiles['ME'], holdout=holdout, repeats=repeats)
-
-    joint_train_set = theano.shared(numpy.concatenate([
-                    output_RNA_t_set, output_GE_t_set, output_ME_t_set],axis=1), borrow=True)
-
-    if holdout > 0:
-        joint_val_set = theano.shared(numpy.concatenate([
-                            output_RNA_v_set, output_GE_v_set, output_ME_v_set],axis=1), borrow=True)
-    else:
-        joint_val_set = None
-
-    top_DBN = train_top(batch_size, graph_output, joint_train_set, joint_val_set, rng)
-
-    # Identifying the classes
-
-    RNA_output, _ = output_DBN(rna_DBN,datafiles['mRNA'])
-    GE_output, _ = output_DBN(ge_DBN,datafiles['GE'])
-    ME_output, _ = output_DBN(me_DBN,datafiles['ME'])
-
-    joint_output = theano.shared(numpy.concatenate([RNA_output, GE_output, ME_output],axis=1), borrow=True)
-
-    classes = top_DBN.get_output(joint_output)
-
-    save_network(classes, ge_DBN, holdout, me_DBN, output_file, output_folder, repeats, rna_DBN, top_DBN)
-
-    return classes
-
-def save_network(classes, ge_DBN, holdout, me_DBN, output_file, output_folder, repeats, rna_DBN, top_DBN):
-    if not os.path.isdir(output_folder):
-        os.makedirs(output_folder)
-    root_dir = os.getcwd()
-    os.chdir(output_folder)
-    numpy.savez(output_file,
-                holdout=holdout,
-                repeats=repeats,
-                rna_config={
-                    'number_of_nodes': rna_DBN.number_of_nodes(),
-                    'epochs': [8000],
-                    'learning_rate': [0.005],
-                    'batch_size': 20,
-                    'k': 10
-                },
-                ge_config={
-                    'number_of_nodes': ge_DBN.number_of_nodes(),
-                    'epochs': [8000, 800],
-                    'learning_rate': [0.005, 0.1],
-                    'batch_size': 20,
-                    'k': 1
-                },
-                me_config={
-                    'number_of_nodes': me_DBN.number_of_nodes(),
-                    'epochs': [8000, 800],
-                    'learning_rate': [0.005, 0.1],
-                    'batch_size': 20,
-                    'k': 1
-                },
-                top_config={
-                    'number_of_nodes': top_DBN.number_of_nodes(),
-                    'epochs': [800, 800],
-                    'learning_rate': [0.1, 0.1],
-                    'batch_size': 20,
-                    'k': 1
-                },
-                classes=classes,
-                rna_params=[{p.name: p.get_value()} for p in rna_DBN.params],
-                ge_params=[{p.name: p.get_value()} for p in ge_DBN.params],
-                me_params=[{p.name: p.get_value()} for p in me_DBN.params],
-                top_params=[{p.name: p.get_value()} for p in top_DBN.params]
-                )
-    os.chdir(root_dir)
-
-def load_network(input_file, input_folder):
-    root_dir = os.getcwd()
-    # TODO: check if the input_folder exists
-    os.chdir(input_folder)
-    npz = numpy.load(input_file)
-
-    config = npz['rna_config'].tolist()
-    params = npz['rna_params']
-    layer_sizes = config['number_of_nodes']
-    rna_DBN = DBN(n_ins=layer_sizes[0], hidden_layers_sizes=layer_sizes[1:-1], n_outs=layer_sizes[-1],
-                  W_list=[params[0]['W']],b_list=[params[1]['b']])
-
-    config = npz['ge_config'].tolist()
-    params = npz['ge_params']
-    layer_sizes = config['number_of_nodes']
-    ge_DBN = DBN(n_ins=layer_sizes[0], hidden_layers_sizes=layer_sizes[1:-1], n_outs=layer_sizes[-1],
-                  W_list=[params[0]['W'],params[2]['W']],b_list=[params[1]['b'],params[3]['b']])
-
-    config = npz['me_config'].tolist()
-    params = npz['me_params']
-    layer_sizes = config['number_of_nodes']
-    me_DBN = DBN(n_ins=layer_sizes[0], hidden_layers_sizes=layer_sizes[1:-1], n_outs=layer_sizes[-1],
-                  W_list=[params[0]['W'],params[2]['W']],b_list=[params[1]['b'],params[3]['b']])
-
-    config = npz['top_config'].tolist()
-    params = npz['top_params']
-    layer_sizes = config['number_of_nodes']
-    top_DBN = DBN(n_ins=layer_sizes[0], hidden_layers_sizes=layer_sizes[1:-1], n_outs=layer_sizes[-1],
-                  gauss=False,
-                  W_list=[params[0]['W'],params[2]['W']],b_list=[params[1]['b'],params[3]['b']])
-
-    os.chdir(root_dir)
-
-    return (rna_DBN, ge_DBN, me_DBN, top_DBN)
+        return (self.get_output(train_set), self.get_output(validation_set))
 
 def train_top(batch_size, graph_output, joint_train_set, joint_val_set, rng):
     top_DBN = DBN(numpy_rng=rng, n_ins=120,
@@ -733,121 +589,6 @@ def train_bottom_layer(train_set, validation_set,
 
     return dbn, output_train_set, output_val_set
 
-def train_ME(datafile,
-             clip=None,
-             batch_size=20,
-             k=1,
-             lambda_1=0,
-             lambda_2=1,
-             layers_sizes=[400, 40],
-             pretraining_epochs=[8000, 800],
-             pretrain_lr=[0.005, 0.1],
-             holdout=0.1,
-             repeats=10,
-             graph_output=False,
-             datadir='data'):
-    print('*** Training on ME ***')
-
-    train_set, validation_set = load_n_preprocess_data(datafile,
-                                                       clip=clip,
-                                                       holdout=holdout,
-                                                       repeats=repeats,
-#                                                       transform_fn=numpy.power,
-#                                                       exponent=1.0/6.0,
-                                                       datadir=datadir)
-
-    return train_bottom_layer(train_set, validation_set,
-                              batch_size=batch_size,
-                              k=k,
-                              layers_sizes=layers_sizes,
-                              pretraining_epochs=pretraining_epochs,
-                              pretrain_lr=pretrain_lr,
-                              lambda_1=lambda_1,
-                              lambda_2=lambda_2,
-                              graph_output=graph_output)
-
-def train_GE(datafile,
-             clip=None,
-             batch_size=20,
-             k=1,
-             lambda_1=0,
-             lambda_2=1,
-             layers_sizes=[400, 40],
-             pretraining_epochs=[8000, 800],
-             pretrain_lr=[0.005, 0.1],
-             holdout=0.1,
-             repeats=10,
-             graph_output=False,
-             datadir='data'):
-    print('*** Training on GE ***')
-
-    train_set, validation_set = load_n_preprocess_data(datafile,
-                                                       clip=clip,
-                                                       holdout=holdout,
-                                                       repeats=repeats,
-                                                       datadir=datadir)
-
-    return train_bottom_layer(train_set, validation_set,
-                              batch_size=batch_size,
-                              k=k,
-                              layers_sizes=layers_sizes,
-                              pretraining_epochs=pretraining_epochs,
-                              pretrain_lr=pretrain_lr,
-                              lambda_1=lambda_1,
-                              lambda_2=lambda_2,
-                              graph_output=graph_output)
-
-def train_RNA(datafile,
-              clip=None,
-              batch_size=20,
-              k=10,
-              lambda_1=0.0,
-              lambda_2=0.1,
-              layers_sizes=[40],
-              pretraining_epochs=[80000],
-              pretrain_lr=[0.005],
-              holdout=0.1,
-              repeats=10,
-              graph_output=False,
-              datadir='data'):
-    print('*** Training on RNA ***')
-
-    train_set, validation_set = load_n_preprocess_data(datafile,
-                                                       clip=clip,
-                                                       holdout=holdout,
-                                                       repeats=repeats,
-                                                       datadir=datadir)
-
-    return train_bottom_layer(train_set, validation_set,
-                                batch_size=batch_size,
-                                k=k,
-                                layers_sizes=layers_sizes,
-                                pretraining_epochs=pretraining_epochs,
-                                pretrain_lr=pretrain_lr,
-                                lambda_1=lambda_1,
-                                lambda_2=lambda_2,
-                                graph_output=graph_output)
-
-def output_DBN(dbn,
-               datafile,
-               holdout=0.0,
-               repeats=1,
-               clip=None,
-               transform_fn=None,
-               exponent=1.0,
-               datadir='data'):
-    train_set, validation_set = load_n_preprocess_data(datafile,
-                                          holdout=holdout,
-                                          clip=clip,
-                                          transform_fn=transform_fn,
-                                          exponent=exponent,
-                                          repeats=repeats,
-                                          shuffle=False,
-                                          datadir=datadir)
-
-    return (dbn.get_output(train_set), dbn.get_output(validation_set))
-
-
 def train_MNIST_Gaussian(graph_output=False):
     # Load the data
     mnist = MNIST()
@@ -869,74 +610,5 @@ def train_MNIST_Gaussian(graph_output=False):
                                 pretrain_lr=[0.01],
                                 graph_output=graph_output)
 
-def load_n_preprocess_data(datafile,
-                           dtype=theano.config.floatX,
-                           holdout=0.1,
-                           clip=None,
-                           transform_fn=None,
-                           exponent=1.0,
-                           repeats=10,
-                           shuffle=True,
-                           datadir='data'):
-    # Load the data, each column is a single person
-    # Pass to a row representation, i.e. the data for each person is now on a
-    # single row.
-    # Normalize the data so that each measurement on our population has zero
-    # mean and zero variance
-    n_data, n_cols, data = import_TCGA_data(datafile, datadir, dtype)
-
-    if transform_fn is not None:
-        data = transform_fn(data, exponent)
-
-    zdata = stats.zscore(data,axis=1)
-    zdata = zdata.T
-
-    if clip is not None:
-        zdata = numpy.clip(zdata, clip[0], clip[1])
-
-    # replicate the samples
-    if repeats > 1:
-        zdata = numpy.repeat(zdata, repeats=repeats, axis=0)
-
-    validation_set_size = int(n_cols*holdout)
-
-    # pre shuffle the data if we have a validation set
-    _, indexes = get_minibatches_idx(n_cols, n_cols -
-                                     validation_set_size, shuffle = shuffle)
-
-    train_set = theano.shared(zdata[indexes[0]], borrow=True)
-    if validation_set_size > 0:
-        validation_set = theano.shared(zdata[indexes[1]], borrow=True)
-    else:
-        validation_set = None
-
-    return train_set, validation_set
-
 if __name__ == '__main__':
-    datafiles = prepare_TCGA_datafiles()
-
-    output_dir = 'MDBN_run'
-    run_start_date = datetime.datetime.now()
-    run_start_date_str = run_start_date.strftime("%Y-%m-%d_%H%M")
-    results = []
-    for i in range(1):
-        dbn_output = train_MDBN(datafiles,
-                                output_folder=output_dir,
-                                output_file='Exp_%s_run_%d.npz' %
-                                                               (run_start_date_str, i),
-                                holdout=0.0, repeats=1)
-        results.append(find_unique_classes((dbn_output > 0.5) * numpy.ones_like(dbn_output)))
-
-    current_date_time = datetime.datetime.now()
-    print('*** Run started at %s' % run_start_date.strftime("%H:%M:%S on %B %d, %Y"))
-    print('*** Run completed at %s' % current_date_time.strftime("%H:%M:%S on %B %d, %Y"))
-
-    root_dir = os.getcwd()
-    os.chdir(output_dir)
-    numpy.savez('Results_%s.npz' % run_start_date_str,
-                results=results)
-    os.chdir(root_dir)
-
-#    train_RNA(datafiles['mRNA'],graph_output=True)
-#    train_GE(datafiles['GE'],graph_output=True)
-#    train_MNIST_Gaussian(graph_output=True)
+    train_MNIST_Gaussian(graph_output=True)
