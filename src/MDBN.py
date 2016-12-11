@@ -549,13 +549,13 @@ def train_MDBN(datafiles,
     #     Training the RBM          #
     #################################
 
-    rna_DBN, output_RNA_t_set, output_RNA_v_set = train_RNA(datafiles['mRNA'],
-                                                            holdout=holdout,
-                                                            repeats=repeats,
-                                                            lambda_1=0.01,
-                                                            lambda_2=0.01,
-                                                            graph_output=graph_output,
-                                                            datadir=datadir)
+    me_DBN, output_ME_t_set, output_ME_v_set = train_ME(datafiles['ME'],
+                                                        holdout=holdout,
+                                                        repeats=repeats,
+                                                        lambda_1=0.01,
+                                                        lambda_2=0.01,
+                                                        graph_output=graph_output,
+                                                        datadir=datadir)
 
     ge_DBN, output_GE_t_set, output_GE_v_set = train_GE(datafiles['GE'],
                                                         holdout=holdout,
@@ -565,7 +565,7 @@ def train_MDBN(datafiles,
                                                         graph_output=graph_output,
                                                         datadir=datadir)
 
-    me_DBN, output_ME_t_set, output_ME_v_set = train_ME(datafiles['ME'],
+    dm_DBN, output_DM_t_set, output_DM_v_set = train_DM(datafiles['DM'],
                                                         holdout=holdout,
                                                         repeats=repeats,
                                                         lambda_1=0.01,
@@ -575,16 +575,16 @@ def train_MDBN(datafiles,
 
     print('*** Training on joint layer ***')
 
-    output_RNA_t_set, output_RNA_v_set = output_DBN(rna_DBN,datafiles['mRNA'],holdout=holdout,repeats=repeats)
+    output_ME_t_set, output_ME_v_set = output_DBN(me_DBN,datafiles['ME'],holdout=holdout,repeats=repeats)
     output_GE_t_set, output_GE_v_set = output_DBN(ge_DBN,datafiles['GE'], holdout=holdout, repeats=repeats)
-    output_ME_t_set, output_ME_v_set = output_DBN(me_DBN,datafiles['ME'], holdout=holdout, repeats=repeats)
+    output_DM_t_set, output_DM_v_set = output_DBN(dm_DBN,datafiles['DM'], holdout=holdout, repeats=repeats)
 
     joint_train_set = theano.shared(numpy.concatenate([
-                    output_RNA_t_set, output_GE_t_set, output_ME_t_set],axis=1), borrow=True)
+                    output_ME_t_set, output_GE_t_set, output_DM_t_set],axis=1), borrow=True)
 
     if holdout > 0:
         joint_val_set = theano.shared(numpy.concatenate([
-                            output_RNA_v_set, output_GE_v_set, output_ME_v_set],axis=1), borrow=True)
+                            output_ME_v_set, output_GE_v_set, output_DM_v_set],axis=1), borrow=True)
     else:
         joint_val_set = None
 
@@ -592,19 +592,19 @@ def train_MDBN(datafiles,
 
     # Identifying the classes
 
-    RNA_output, _ = output_DBN(rna_DBN,datafiles['mRNA'])
-    GE_output, _ = output_DBN(ge_DBN,datafiles['GE'])
     ME_output, _ = output_DBN(me_DBN,datafiles['ME'])
+    GE_output, _ = output_DBN(ge_DBN,datafiles['GE'])
+    DM_output, _ = output_DBN(dm_DBN,datafiles['DM'])
 
-    joint_output = theano.shared(numpy.concatenate([RNA_output, GE_output, ME_output],axis=1), borrow=True)
+    joint_output = theano.shared(numpy.concatenate([ME_output, GE_output, DM_output],axis=1), borrow=True)
 
     classes = top_DBN.get_output(joint_output)
 
-    save_network(classes, ge_DBN, holdout, me_DBN, output_file, output_folder, repeats, rna_DBN, top_DBN)
+    save_network(classes, ge_DBN, me_DBN, dm_DBN, top_DBN, holdout, output_file, output_folder, repeats)
 
     return classes
 
-def save_network(classes, ge_DBN, holdout, me_DBN, output_file, output_folder, repeats, rna_DBN, top_DBN):
+def save_network(classes, ge_DBN, me_DBN, dm_DBN, top_DBN, holdout, output_file, output_folder, repeats):
     if not os.path.isdir(output_folder):
         os.makedirs(output_folder)
     root_dir = os.getcwd()
@@ -612,8 +612,8 @@ def save_network(classes, ge_DBN, holdout, me_DBN, output_file, output_folder, r
     numpy.savez(output_file,
                 holdout=holdout,
                 repeats=repeats,
-                rna_config={
-                    'number_of_nodes': rna_DBN.number_of_nodes(),
+                me_config={
+                    'number_of_nodes': me_DBN.number_of_nodes(),
                     'epochs': [8000],
                     'learning_rate': [0.005],
                     'batch_size': 20,
@@ -626,8 +626,8 @@ def save_network(classes, ge_DBN, holdout, me_DBN, output_file, output_folder, r
                     'batch_size': 20,
                     'k': 1
                 },
-                me_config={
-                    'number_of_nodes': me_DBN.number_of_nodes(),
+                dm_config={
+                    'number_of_nodes': dm_DBN.number_of_nodes(),
                     'epochs': [8000, 800],
                     'learning_rate': [0.005, 0.1],
                     'batch_size': 20,
@@ -641,9 +641,9 @@ def save_network(classes, ge_DBN, holdout, me_DBN, output_file, output_folder, r
                     'k': 1
                 },
                 classes=classes,
-                rna_params=[{p.name: p.get_value()} for p in rna_DBN.params],
-                ge_params=[{p.name: p.get_value()} for p in ge_DBN.params],
                 me_params=[{p.name: p.get_value()} for p in me_DBN.params],
+                ge_params=[{p.name: p.get_value()} for p in ge_DBN.params],
+                dm_params=[{p.name: p.get_value()} for p in dm_DBN.params],
                 top_params=[{p.name: p.get_value()} for p in top_DBN.params]
                 )
     os.chdir(root_dir)
@@ -654,10 +654,10 @@ def load_network(input_file, input_folder):
     os.chdir(input_folder)
     npz = numpy.load(input_file)
 
-    config = npz['rna_config'].tolist()
-    params = npz['rna_params']
+    config = npz['me_config'].tolist()
+    params = npz['me_params']
     layer_sizes = config['number_of_nodes']
-    rna_DBN = DBN(n_ins=layer_sizes[0], hidden_layers_sizes=layer_sizes[1:-1], n_outs=layer_sizes[-1],
+    me_DBN = DBN(n_ins=layer_sizes[0], hidden_layers_sizes=layer_sizes[1:-1], n_outs=layer_sizes[-1],
                   W_list=[params[0]['W']],b_list=[params[1]['b']])
 
     config = npz['ge_config'].tolist()
@@ -666,10 +666,10 @@ def load_network(input_file, input_folder):
     ge_DBN = DBN(n_ins=layer_sizes[0], hidden_layers_sizes=layer_sizes[1:-1], n_outs=layer_sizes[-1],
                   W_list=[params[0]['W'],params[2]['W']],b_list=[params[1]['b'],params[3]['b']])
 
-    config = npz['me_config'].tolist()
-    params = npz['me_params']
+    config = npz['dm_config'].tolist()
+    params = npz['dm_params']
     layer_sizes = config['number_of_nodes']
-    me_DBN = DBN(n_ins=layer_sizes[0], hidden_layers_sizes=layer_sizes[1:-1], n_outs=layer_sizes[-1],
+    dm_DBN = DBN(n_ins=layer_sizes[0], hidden_layers_sizes=layer_sizes[1:-1], n_outs=layer_sizes[-1],
                   W_list=[params[0]['W'],params[2]['W']],b_list=[params[1]['b'],params[3]['b']])
 
     config = npz['top_config'].tolist()
@@ -681,7 +681,7 @@ def load_network(input_file, input_folder):
 
     os.chdir(root_dir)
 
-    return (rna_DBN, ge_DBN, me_DBN, top_DBN)
+    return (me_DBN, ge_DBN, dm_DBN, top_DBN)
 
 def train_top(batch_size, graph_output, joint_train_set, joint_val_set, rng):
     top_DBN = DBN(numpy_rng=rng, n_ins=120,
@@ -733,7 +733,7 @@ def train_bottom_layer(train_set, validation_set,
 
     return dbn, output_train_set, output_val_set
 
-def train_ME(datafile,
+def train_DM(datafile,
              clip=None,
              batch_size=20,
              k=1,
@@ -746,7 +746,7 @@ def train_ME(datafile,
              repeats=10,
              graph_output=False,
              datadir='data'):
-    print('*** Training on ME ***')
+    print('*** Training on DM ***')
 
     train_set, validation_set = load_n_preprocess_data(datafile,
                                                        clip=clip,
@@ -797,20 +797,20 @@ def train_GE(datafile,
                               lambda_2=lambda_2,
                               graph_output=graph_output)
 
-def train_RNA(datafile,
-              clip=None,
-              batch_size=20,
-              k=10,
-              lambda_1=0.0,
-              lambda_2=0.1,
-              layers_sizes=[40],
-              pretraining_epochs=[80000],
-              pretrain_lr=[0.005],
-              holdout=0.1,
-              repeats=10,
-              graph_output=False,
-              datadir='data'):
-    print('*** Training on RNA ***')
+def train_ME(datafile,
+             clip=None,
+             batch_size=20,
+             k=10,
+             lambda_1=0.0,
+             lambda_2=0.1,
+             layers_sizes=[40],
+             pretraining_epochs=[80000],
+             pretrain_lr=[0.005],
+             holdout=0.1,
+             repeats=10,
+             graph_output=False,
+             datadir='data'):
+    print('*** Training on ME ***')
 
     train_set, validation_set = load_n_preprocess_data(datafile,
                                                        clip=clip,
