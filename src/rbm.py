@@ -270,6 +270,10 @@ class RBM(object):
 
         :param k: number of Gibbs steps to do in CD-k/PCD-k
 
+        :param symbolic_grad: boolean set to True when symbolic gradient
+                        of log-likelihood is used. Default is False and
+                        RBM specific gradient computation is used.
+
         :param lambda_1: parameter for tuning weigths updates in CD-k/PCD-k
                          of Bernoullian RBM
 
