@@ -255,30 +255,38 @@ class RBM(object):
         return [pre_sigmoid_h1, h1_mean, h1_sample,
                 pre_sigmoid_v1, v1_mean, v1_sample]
 
-    def get_cost_updates(self, lr=0.1, k=1,
+    def get_cost_updates(self,
+                         lr=0.1,
+                         k=1,
+                         symbolic_grad=False,
                          lambda_1=0.0,
                          lambda_2=0.0,
                          weightcost = 0.0,
-                         batch_size=None, persistent=None):
+                         batch_size=None,
+                         persistent=None):
         """This functions implements one step of CD-k or PCD-k
 
         :param lr: learning rate used to train the RBM
+
+        :param k: number of Gibbs steps to do in CD-k/PCD-k
+
+        :param lambda_1: parameter for tuning weigths updates in CD-k/PCD-k
+                         of Bernoullian RBM
+
+        :param lambda_2: parameter for tuning weigths updates in CD-k/PCD-k
+                         of Bernoullian RBM
+
+        :param weightcost: L2 weight-decay (see Hinton 2010
+            "A Practical Guide to Training Restricted Boltzmann
+            Machines" section 10)
+
+        :param batch_size: size of the batch of samples used for training
 
         :param persistent: None for CD. For PCD, shared variable
             containing archived state of Gibbs chain. This must be a shared
             variable of size (batch size, number of hidden units).
 
-        :param k: number of Gibbs steps to do in CD-k/PCD-k
-
-        :param lambda_1: gradual shrinkage (?)
-
-        :param lambda_2: gradual shrinkage (?)
-
-        :param weightcost: L2 weight-decay (see Hinton 2010
-            "A Practical Guide to Training Restricted Boltzmann
-            Machines" section 10
-
-        Returns a proxy for the cost and the updates dictionary. The
+        :return: Returns a proxy for the cost and the updates dictionary. The
         dictionary contains the update rules for weights and biases but
         also an update of the shared variable used to store the persistent
         chain, if one is used.
@@ -325,35 +333,22 @@ class RBM(object):
         # note that we only need the sample at the end of the chain
         chain_end = nv_samples[-1]
 
-        if batch_size is not None:
-            W_grad =  (tensor.dot(self.input.T, ph_mean) -
-                        tensor.dot(nv_means[-1].T, nh_means[-1]))/\
-                        tensor.cast(batch_size,dtype=theano.config.floatX) - \
-                        tensor.cast(weightcost, dtype=theano.config.floatX) * \
-                            self.W.get_value(borrow=True)
-
-            hbias_grad = tensor.mean(ph_mean - nh_means[-1], axis=0)
-
-            vbias_grad = tensor.mean(self.input - nv_means[-1], axis=0)
-
-            gradients = [W_grad, hbias_grad, vbias_grad ]
+        if symbolic_grad:
+            gradients = self.compute_symbolic_grad(chain_end)
         else:
-            cost = tensor.mean(self.free_energy(chain_end)) - \
-                   tensor.mean(self.free_energy(self.input))
+            gradients = self.compute_rbm_grad(batch_size, ph_mean, nh_means[-1], nv_means[-1],
+                                              weightcost)
 
-            # We must not compute the gradient through the gibbs sampling
-            gradients = tensor.grad(cost, self.params, consider_constant=[chain_end])
-
-        epsilon = 0.001
+        offset = 0.001
         # ISSUE: it returns Inf when Wij is small
-        gradients[0] = gradients[0] / tensor.cast(1 + 2 * lr * lambda_1 / (tensor.abs_(self.W)+epsilon),
+        gradients[0] = gradients[0] / tensor.cast(1 + 2 * lr * lambda_1 / (tensor.abs_(self.W)+offset),
                                                    dtype=theano.config.floatX)
 
         # constructs the update dictionary
         multipliers = [
             # (1 - 2 * lr * lambda_2),
             # Issue: it returns Inf when Wij is small, therefore a small constant is added
-            (1 - 2 * lr * lambda_2) / (1 + 2 * lr * lambda_1 / (tensor.abs_(self.W) + epsilon)),
+            (1 - 2 * lr * lambda_2) / (1 + 2 * lr * lambda_1 / (tensor.abs_(self.W) + offset)),
             1,1]
 
         for gradient, param, multiplier, param_speed in zip(gradients, self.params,
@@ -377,6 +372,47 @@ class RBM(object):
             monitoring_cost = self.get_reconstruction_cost(pre_sigmoid_nvs[-1])
 
         return monitoring_cost, updates
+
+    def compute_symbolic_grad(self, chain_end):
+        """
+        Compute the gradient of the log-likelihood with respect to the parameters
+        self.params symbolically.
+
+        :param chain_end: symbolic variable with the final sample of the Gibbs chain
+        :return: a list with the gradients for each of the parameters self.params
+        """
+        cost = tensor.mean(self.free_energy(chain_end)) - \
+               tensor.mean(self.free_energy(self.input))
+        # We must not compute the gradient through the gibbs sampling
+        gradients = tensor.grad(cost, self.params, consider_constant=[chain_end])
+        return gradients
+
+    def compute_rbm_grad(self, batch_size, ph_mean, nh_mean, nv_mean, weightcost):
+        """
+        Compute the gradient of the log-likelihood for an RBM with respect to the
+        parameters self.params using the expectations.
+
+        :param batch_size: number of samples of the training set
+        :param ph_mean: symbolic variable with p(h_i=1|v0) where v0 is a training sample
+                        for all hidden nodes and for all samples
+        :param nh_mean: symbolic variable with p(h_i=1|vk) where vk is the final sample
+                        of the Gibbs chain for all hidden nodes and for all samples
+        :param nv_mean: symbolic variable with p(v_j=1|hk) where hk is the final hidden
+                        layer of the Gibbs chain for all visible nodes and for all samples
+        :param weightcost: scalar used as weight-cost for L1 weight-decay
+                        (see Hinton, "A Practical Guide to Training Restricted Boltzmann
+                        Machines" (2010))
+        :return:
+        """
+        W_grad = (tensor.dot(self.input.T, ph_mean) -
+                  tensor.dot(nv_mean.T, nh_mean)) / \
+                 tensor.cast(batch_size, dtype=theano.config.floatX) - \
+                 tensor.cast(weightcost, dtype=theano.config.floatX) * \
+                 self.W.get_value(borrow=True)
+        hbias_grad = tensor.mean(ph_mean - nh_mean, axis=0)
+        vbias_grad = tensor.mean(self.input - nv_mean, axis=0)
+        gradients = [W_grad, hbias_grad, vbias_grad]
+        return gradients
 
     def get_pseudo_likelihood_cost(self, updates):
         """Stochastic approximation to the pseudo-likelihood"""
