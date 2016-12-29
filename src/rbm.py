@@ -280,7 +280,7 @@ class RBM(object):
         :param lambda_2: parameter for tuning weigths updates in CD-k/PCD-k
                          of Bernoullian RBM
 
-        :param weightcost: L2 weight-decay (see Hinton 2010
+        :param weightcost: L1 weight-decay (see Hinton 2010
             "A Practical Guide to Training Restricted Boltzmann
             Machines" section 10)
 
@@ -298,7 +298,7 @@ class RBM(object):
         """
 
         self.Wt = self.W.T
-        # compute positive phase
+        # compute values for the positive phase
         pre_sigmoid_ph, ph_mean, ph_sample = self.sample_h_given_v(self.input)
 
         # decide how to initialize persistent chain:
@@ -343,26 +343,23 @@ class RBM(object):
             gradients = self.compute_rbm_grad(batch_size, ph_mean, nh_means[-1], nv_means[-1],
                                               weightcost)
 
-        offset = 0.001
+        epsilon = 0.001
         # ISSUE: it returns Inf when Wij is small
-        gradients[0] = gradients[0] / tensor.cast(1 + 2 * lr * lambda_1 / (tensor.abs_(self.W)+offset),
+        gradients[0] = gradients[0] / tensor.cast(1 + 2 * lr * lambda_1 / (tensor.abs_(self.W)+epsilon),
                                                    dtype=theano.config.floatX)
 
         # constructs the update dictionary
         multipliers = [
-            # (1 - 2 * lr * lambda_2),
             # Issue: it returns Inf when Wij is small, therefore a small constant is added
-            (1 - 2 * lr * lambda_2) / (1 + 2 * lr * lambda_1 / (tensor.abs_(self.W) + offset)),
+            (1 - 2 * lr * lambda_2) / (1 + 2 * lr * lambda_1 / (tensor.abs_(self.W) + epsilon)),
             1,1]
 
-        for gradient, param, multiplier, param_speed in zip(gradients, self.params,
-                                                        multipliers, self.params_speed):
-            # make sure that the learning rate is of the right dtype
-            # update rules as in https://github.com/lisa-lab/pylearn2/blob/master/pylearn2/models/rbm.py
-
+        for gradient, param, multiplier, param_speed in zip(
+                gradients, self.params, multipliers, self.params_speed):
+            # make sure that the momentum is of the right dtype
             updates[param_speed] = gradient + (param_speed - gradient) * \
                                    tensor.cast(self.momentum, dtype=theano.config.floatX)
-
+            # make sure that the learning rate is of the right dtype
             updates[param] = param * tensor.cast(multiplier, dtype=theano.config.floatX) + \
                              param_speed * tensor.cast(lr, dtype=theano.config.floatX)
 
@@ -393,20 +390,22 @@ class RBM(object):
 
     def compute_rbm_grad(self, batch_size, ph_mean, nh_mean, nv_mean, weightcost):
         """
-        Compute the gradient of the log-likelihood for an RBM with respect to the
-        parameters self.params using the expectations.
+        Compute the gradient of the log-likelihood for an RBM with respect
+        to the parameters self.params using the expectations.
 
         :param batch_size: number of samples of the training set
-        :param ph_mean: symbolic variable with p(h_i=1|v0) where v0 is a training sample
-                        for all hidden nodes and for all samples
-        :param nh_mean: symbolic variable with p(h_i=1|vk) where vk is the final sample
-                        of the Gibbs chain for all hidden nodes and for all samples
-        :param nv_mean: symbolic variable with p(v_j=1|hk) where hk is the final hidden
-                        layer of the Gibbs chain for all visible nodes and for all samples
+        :param ph_mean: symbolic variable with p(h_i=1|v0) where v0 is a
+                        training sample for all hidden nodes and for all samples
+        :param nh_mean: symbolic variable with p(h_i=1|vk) where vk is the
+                        final sample of the Gibbs chain for all hidden nodes and
+                        for all samples
+        :param nv_mean: symbolic variable with p(v_j=1|hk) where hk is the final
+                        hidden layer of the Gibbs chain for all visible nodes and
+                        for all samples
         :param weightcost: scalar used as weight-cost for L1 weight-decay
-                        (see Hinton, "A Practical Guide to Training Restricted Boltzmann
-                        Machines" (2010))
-        :return:
+                        (see Hinton, "A Practical Guide to Training Restricted
+                        Boltzmann Machines" (2010))
+        :return: a list with the gradients for each parameter in self.params
         """
         W_grad = (tensor.dot(self.input.T, ph_mean) -
                   tensor.dot(nv_mean.T, nh_mean)) / \
