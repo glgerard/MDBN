@@ -26,7 +26,6 @@ All rights reserved.
 
 from __future__ import print_function, division
 
-import numpy
 from dbn import DBN
 
 def train_top(batch_size, graph_output, joint_train_set, joint_val_set, rng):
