@@ -258,12 +258,13 @@ class RBM(object):
     def get_cost_updates(self,
                          lr=0.1,
                          k=1,
-                         symbolic_grad=False,
                          lambda_1=0.0,
                          lambda_2=0.0,
                          weightcost = 0.0,
                          batch_size=None,
-                         persistent=None):
+                         persistent=None,
+                         symbolic_grad=False
+                         ):
         """This functions implements one step of CD-k or PCD-k
 
         :param lr: learning rate used to train the RBM
