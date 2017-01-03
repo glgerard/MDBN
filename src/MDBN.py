@@ -33,11 +33,11 @@ def train_top(batch_size, graph_output, joint_train_set, joint_val_set, rng):
                   gauss=False,
                   hidden_layers_sizes=[24],
                   n_outs=3)
-    top_DBN.pretraining(joint_train_set, joint_val_set,
-                        batch_size, k=1,
-                        pretraining_epochs=[800, 800],
-                        pretrain_lr=[0.1, 0.1],
-                        graph_output=graph_output)
+    top_DBN.training(joint_train_set, joint_val_set,
+                     batch_size, k=1,
+                     pretraining_epochs=[800, 800],
+                     pretrain_lr=[0.1, 0.1],
+                     graph_output=graph_output)
     return top_DBN
 
 
@@ -57,14 +57,14 @@ def train_bottom_layer(train_set, validation_set,
                   hidden_layers_sizes=layers_sizes[:-1],
                   n_outs=layers_sizes[-1])
 
-    dbn.pretraining(train_set,
-                        validation_set,
-                        batch_size, k=k,
-                        pretraining_epochs=pretraining_epochs,
-                        pretrain_lr=pretrain_lr,
-                        lambda_1=lambda_1,
-                        lambda_2=lambda_2,
-                        graph_output=graph_output)
+    dbn.training(train_set,
+                 validation_set,
+                 batch_size, k=k,
+                 pretraining_epochs=pretraining_epochs,
+                 pretrain_lr=pretrain_lr,
+                 lambda_1=lambda_1,
+                 lambda_2=lambda_2,
+                 graph_output=graph_output)
 
     output_train_set = dbn.get_output(train_set)
     if validation_set is not None:

@@ -235,9 +235,9 @@ class DBN(object):
         else:
             return None
 
-    def pretraining_functions(self, train_set_x, validation_set_x,
-                              batch_size, k, lambda_1 = 0.0, lambda_2 = 0.1,
-                              monitor=False):
+    def training_functions(self, train_set_x, batch_size, k,
+                           lambda_1 = 0.0, lambda_2 = 0.1,
+                           monitor=False):
         '''Generates a list of functions, for performing one step of
         gradient descent at a given layer. The function will require
         as input the minibatch index, and to train an RBM you just
@@ -247,10 +247,6 @@ class DBN(object):
         :type train_set_x: theano.tensor.TensorType
         :param train_set_x: Shared var. that contains all datapoints used
                             for training the DBN
-
-        :type validation_set_x: theano.tensor.TensorType
-        :param validation_set_x: Shared var. that contains all datapoints used
-                            for validating the DBN
 
         :type batch_size: int
         :param batch_size: size of a [mini]batch
@@ -279,7 +275,7 @@ class DBN(object):
         # TODO: deal with batch_size of 1
         assert batch_size > 1
 
-        pretrain_fns = []
+        train_fns = []
         free_energy_gap_fns = []
         for i, rbm in enumerate(self.rbm_layers):
             # get the cost and the updates list
@@ -316,7 +312,7 @@ class DBN(object):
             )
 
             # append `fn` to the list of functions
-            pretrain_fns.append(fn)
+            train_fns.append(fn)
 
             train_sample = tensor.matrix('train_smaple', dtype=theano.config.floatX)
             test_sample = tensor.matrix('validation_smaple', dtype=theano.config.floatX)
@@ -333,24 +329,21 @@ class DBN(object):
 
             free_energy_gap_fns.append(fn)
 
-        return pretrain_fns, free_energy_gap_fns
+        return train_fns, free_energy_gap_fns
 
-    def pretraining(self, train_set_x, validation_set_x,
-                    batch_size, k,
-                    pretraining_epochs, pretrain_lr,
-                    lambda_1 = 0.0,
-                    lambda_2 = 0.1,
-                    monitor=False, graph_output=False):
+    def training(self, train_set_x,
+                 batch_size, k,
+                 pretraining_epochs, pretrain_lr,
+                 lambda_1 = 0.0,
+                 lambda_2 = 0.1,
+                 validation_set_x=None,
+                 monitor=False, graph_output=False):
         '''
         Run the DBN pretraining.
 
         :type train_set_x: theano.tensor.TensorType
         :param train_set_x: Shared var. that contains all datapoints used
                             for training the DBN
-
-        :type validation_set_x: theano.tensor.TensorType
-        :param validation_set_x: Shared var. that contains all datapoints used
-                            for validating the DBN
 
         :type batch_size: int
         :param batch_size: size of a [mini]batch
@@ -372,6 +365,10 @@ class DBN(object):
         :param lambda_2: parameter for tuning weigths updates in CD-k/PCD-k
                          of Bernoullian RBM
 
+        :type validation_set_x: theano.tensor.TensorType
+        :param validation_set_x: Shared var. that contains all datapoints used
+                            for validating the DBN
+
         :type monitor: bool
         :param monitor: set to true to enable theano debugging Monitoring Mode;
                         default is false
@@ -388,17 +385,16 @@ class DBN(object):
         if validation_set_x is not None:
             print('Validation set sample size %i' % validation_set_x.get_value().shape[0])
 
-        pretraining_fns, free_energy_gap_fns = self.pretraining_functions(train_set_x=train_set_x,
-                                                     validation_set_x=validation_set_x,
-                                                     batch_size=batch_size,
-                                                     k=k,
-                                                     lambda_1=lambda_1,
-                                                     lambda_2=lambda_2,
-                                                     monitor=monitor)
+        training_fns, free_energy_gap_fns = self.training_functions(train_set_x=train_set_x,
+                                                                       batch_size=batch_size,
+                                                                       k=k,
+                                                                       lambda_1=lambda_1,
+                                                                       lambda_2=lambda_2,
+                                                                       monitor=monitor)
 
         print('... pre-training the model')
         start_time = timeit.default_timer()
-        # Pre-train layer-wise
+        # train layer-wise
 
         if graph_output:
             plt.ion()
@@ -436,7 +432,7 @@ class DBN(object):
             else:
                 momentum = 0.6
 
-            # go through pretraining epochs
+            # go through training epochs
             best_cost = numpy.inf
             epoch = 0
             done_looping = False
@@ -457,7 +453,7 @@ class DBN(object):
                     momentum = 0.9
 
                 for mb, minibatch in enumerate(minibatches):
-                    current_cost = pretraining_fns[i](indexes=minibatch,
+                    current_cost = training_fns[i](indexes=minibatch,
                                                 momentum=momentum,
                                                 lr=pretrain_lr[i])
                     # iteration number
@@ -567,11 +563,12 @@ def train_top(batch_size, graph_output, joint_train_set, joint_val_set, rng):
                   gauss=False,
                   hidden_layers_sizes=[24],
                   n_outs=3)
-    top_DBN.pretraining(joint_train_set, joint_val_set,
-                        batch_size, k=1,
-                        pretraining_epochs=[800, 800],
-                        pretrain_lr=[0.1, 0.1],
-                        graph_output=graph_output)
+    top_DBN.training(joint_train_set,
+                     batch_size, k=1,
+                     pretraining_epochs=[800, 800],
+                     pretrain_lr=[0.1, 0.1],
+                     validation_set_x=joint_val_set,
+                     graph_output=graph_output)
     return top_DBN
 
 
@@ -595,14 +592,14 @@ def train_bottom_layer(train_set, validation_set,
                   hidden_layers_sizes=layers_sizes[:-1],
                   n_outs=layers_sizes[-1])
 
-    dbn.pretraining(train_set,
-                        validation_set,
-                        batch_size, k=k,
-                        pretraining_epochs=pretraining_epochs,
-                        pretrain_lr=pretrain_lr,
-                        lambda_1=lambda_1,
-                        lambda_2=lambda_2,
-                        graph_output=graph_output)
+    dbn.training(train_set,
+                 batch_size, k=k,
+                 pretraining_epochs=pretraining_epochs,
+                 pretrain_lr=pretrain_lr,
+                 lambda_1=lambda_1,
+                 lambda_2=lambda_2,
+                 validation_set_x=validation_set,
+                 graph_output=graph_output)
 
     output_train_set = dbn.get_output(train_set)
     if validation_set is not None:
@@ -623,10 +620,10 @@ def train_MNIST_Gaussian(graph_output=False):
     train_set = theano.shared(dataset[0:int(n_data*5/6)], borrow=True)
     validation_set = theano.shared(dataset[-39:], borrow=True)
 
-    batch_size = 20,
-    k = 1,
-    layers_sizes = [1000, 500],
-    pretraining_epochs = [100, 100],
+    batch_size = 20
+    k = 1
+    layers_sizes = [1000, 500]
+    pretraining_epochs = [100, 100]
     pretrain_lr = [0.01, 0.01]
     lambda_1 = 0.0,
     lambda_2 = 0.1
@@ -640,14 +637,14 @@ def train_MNIST_Gaussian(graph_output=False):
                 hidden_layers_sizes=layers_sizes[:-1],
                 n_outs=layers_sizes[-1])
 
-    dbn.pretraining(train_set,
-                        validation_set,
-                        batch_size, k=k,
-                        pretraining_epochs=pretraining_epochs,
-                        pretrain_lr=pretrain_lr,
-                        lambda_1=lambda_1,
-                        lambda_2=lambda_2,
-                        graph_output=graph_output)
+    dbn.training(train_set,
+                 batch_size, k=k,
+                 pretraining_epochs=pretraining_epochs,
+                 pretrain_lr=pretrain_lr,
+                 lambda_1=lambda_1,
+                 lambda_2=lambda_2,
+                 validation_set_x=validation_set,
+                 graph_output=graph_output)
 
     output_train_set = dbn.get_output(train_set)
     output_val_set = dbn.get_output(validation_set)
