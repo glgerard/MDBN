@@ -27,14 +27,20 @@ All rights reserved.
 import numpy
 from scipy.spatial import distance
 import os
+import gzip
 from scipy import stats
 import theano
 
 def import_TCGA_data(file, datadir, dtype):
     root_dir = os.getcwd()
     os.chdir(datadir)
-    with open(file) as f:
-        ncols = len(f.readline().split('\t'))
+
+    if file.endswith('.gz'):
+        with gzip.open(file) as f:
+            ncols = len(f.readline().split('\t'))
+    else:
+        with open(file) as f:
+            ncols = len(f.readline().split('\t'))
 
     data = numpy.loadtxt(file,
                        dtype=dtype,
