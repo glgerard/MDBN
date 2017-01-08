@@ -36,6 +36,7 @@ def train_AML_MDBN(datafiles,
     #################################
 
     me_DBN, output_ME_t_set, output_ME_v_set = train_ME(datafiles['ME'],
+                                                        rng,
                                                         holdout=holdout,
                                                         repeats=repeats,
                                                         lambda_1=0.01,
@@ -44,6 +45,7 @@ def train_AML_MDBN(datafiles,
                                                         datadir=datadir)
 
     ge_DBN, output_GE_t_set, output_GE_v_set = train_GE(datafiles['GE'],
+                                                        rng,
                                                         holdout=holdout,
                                                         repeats=repeats,
                                                         lambda_1=0.01,
@@ -51,6 +53,7 @@ def train_AML_MDBN(datafiles,
                                                         graph_output=graph_output,
                                                         datadir=datadir)
     sm_DBN, output_SM_t_set, output_SM_v_set = train_SM(datafiles['SM'],
+                                                        rng,
                                                         holdout=holdout,
                                                         repeats=repeats,
                                                         lambda_1=0.01,
@@ -59,6 +62,7 @@ def train_AML_MDBN(datafiles,
                                                         datadir=datadir)
 
 #    dm_DBN, output_DM_t_set, output_DM_v_set = train_DM(datafiles['DM'],
+#                                                        rng,
 #                                                        holdout=holdout,
 #                                                        repeats=repeats,
 #                                                        lambda_1=0.01,
@@ -201,6 +205,7 @@ def load_network(input_file, input_folder):
     return (me_DBN, ge_DBN, sm_DBN, None, top_DBN)
 
 def train_DM(datafile,
+             rng,
              clip=None,
              batch_size=20,
              k=1,
@@ -231,9 +236,11 @@ def train_DM(datafile,
                               pretrain_lr=pretrain_lr,
                               lambda_1=lambda_1,
                               lambda_2=lambda_2,
+                              rng=rng,
                               graph_output=graph_output)
 
 def train_GE(datafile,
+             rng,
              clip=None,
              batch_size=20,
              k=1,
@@ -262,9 +269,11 @@ def train_GE(datafile,
                               pretrain_lr=pretrain_lr,
                               lambda_1=lambda_1,
                               lambda_2=lambda_2,
+                              rng=rng,
                               graph_output=graph_output)
 
 def train_ME(datafile,
+             rng,
              clip=None,
              batch_size=20,
              k=10,
@@ -293,9 +302,11 @@ def train_ME(datafile,
                                 pretrain_lr=pretrain_lr,
                                 lambda_1=lambda_1,
                                 lambda_2=lambda_2,
+                                rng=rng,
                                 graph_output=graph_output)
 
 def train_SM(datafile,
+             rng,
              clip=None,
              batch_size=20,
              k=1,
@@ -324,6 +335,7 @@ def train_SM(datafile,
                                 pretrain_lr=pretrain_lr,
                                 lambda_1=lambda_1,
                                 lambda_2=lambda_2,
+                                rng=rng,
                                 graph_output=graph_output)
 
 def prepare_AML_TCGA_datafiles(datadir='data'):

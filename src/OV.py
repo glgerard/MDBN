@@ -18,16 +18,36 @@ from utils import load_n_preprocess_data
 def train_MDBN(datafiles,
                datadir='data',
                batch_size=20,
-               holdout=0.1,
-               repeats=10,
+               holdout=0,
+               repeats=1,
                graph_output=False,
                output_folder='MDBN_run',
                output_file='parameters_and_classes.npz',
                rng=None):
     """
-    :param datafile: path to the dataset
+    :param datafiles: a dictionary with the path to the unimodal datasets
+
+    :param datadir: directory where the datasets are located
 
     :param batch_size: size of a batch used to train the RBM
+
+    :param holdout: percentage of samples used for validation. By default there
+                    is no validation set
+
+    :param repeats: repeat each sample repeats time to artifically increase the size
+                    of each dataset. By default data is not repeated
+
+    :param graph_output: if True it will output graphical representation of the
+                        network parameters
+
+    :param output_folder: directory where the results are stored
+
+    :param output_file: name of the file where the parameters are saved at the end
+                        of the training
+
+    :param rng: random number generator, by default is None and it is initialized
+                by the function
+
     """
 
     if rng is None:
@@ -38,6 +58,7 @@ def train_MDBN(datafiles,
     #################################
 
     me_DBN, output_ME_t_set, output_ME_v_set = train_ME(datafiles['ME'],
+                                                        rng,
                                                         holdout=holdout,
                                                         repeats=repeats,
                                                         lambda_1=0.01,
@@ -46,6 +67,7 @@ def train_MDBN(datafiles,
                                                         datadir=datadir)
 
     ge_DBN, output_GE_t_set, output_GE_v_set = train_GE(datafiles['GE'],
+                                                        rng,
                                                         holdout=holdout,
                                                         repeats=repeats,
                                                         lambda_1=0.01,
@@ -54,6 +76,7 @@ def train_MDBN(datafiles,
                                                         datadir=datadir)
 
     dm_DBN, output_DM_t_set, output_DM_v_set = train_DM(datafiles['DM'],
+                                                        rng,
                                                         holdout=holdout,
                                                         repeats=repeats,
                                                         lambda_1=0.01,
@@ -172,6 +195,7 @@ def load_network(input_file, input_folder):
     return (me_DBN, ge_DBN, dm_DBN, top_DBN)
 
 def train_DM(datafile,
+             rng,
              clip=None,
              batch_size=20,
              k=1,
@@ -202,9 +226,11 @@ def train_DM(datafile,
                               pretrain_lr=pretrain_lr,
                               lambda_1=lambda_1,
                               lambda_2=lambda_2,
+                              rng=rng,
                               graph_output=graph_output)
 
 def train_GE(datafile,
+             rng,
              clip=None,
              batch_size=20,
              k=1,
@@ -233,9 +259,11 @@ def train_GE(datafile,
                               pretrain_lr=pretrain_lr,
                               lambda_1=lambda_1,
                               lambda_2=lambda_2,
+                              rng=rng,
                               graph_output=graph_output)
 
 def train_ME(datafile,
+             rng,
              clip=None,
              batch_size=20,
              k=10,
@@ -264,6 +292,7 @@ def train_ME(datafile,
                                 pretrain_lr=pretrain_lr,
                                 lambda_1=lambda_1,
                                 lambda_2=lambda_2,
+                                rng=rng,
                                 graph_output=graph_output)
 
 def prepare_OV_TCGA_datafiles(datadir='data'):
