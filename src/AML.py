@@ -4,7 +4,7 @@ import datetime
 import numpy
 import theano
 
-from MDBN import train_bottom_layer
+from MDBN import train_dbn
 from MDBN import train_top
 from MDBN import DBN
 
@@ -202,16 +202,16 @@ def train_DM(datafile,
 #                                                       exponent=1.0/6.0,
                                                        datadir=datadir)
 
-    return train_bottom_layer(train_set, validation_set,
-                              batch_size=batch_size,
-                              k=k,
-                              layers_sizes=layers_sizes,
-                              pretraining_epochs=pretraining_epochs,
-                              pretrain_lr=pretrain_lr,
-                              lambda_1=lambda_1,
-                              lambda_2=lambda_2,
-                              rng=rng,
-                              graph_output=graph_output)
+    return train_dbn(train_set, validation_set,
+                     batch_size=batch_size,
+                     k=k,
+                     layers_sizes=layers_sizes,
+                     pretraining_epochs=pretraining_epochs,
+                     pretrain_lr=pretrain_lr,
+                     lambda_1=lambda_1,
+                     lambda_2=lambda_2,
+                     rng=rng,
+                     graph_output=graph_output)
 
 def train_GE(datafile,
              rng,
@@ -235,16 +235,16 @@ def train_GE(datafile,
                                                        repeats=repeats,
                                                        datadir=datadir)
 
-    return train_bottom_layer(train_set, validation_set,
-                              batch_size=batch_size,
-                              k=k,
-                              layers_sizes=layers_sizes,
-                              pretraining_epochs=pretraining_epochs,
-                              pretrain_lr=pretrain_lr,
-                              lambda_1=lambda_1,
-                              lambda_2=lambda_2,
-                              rng=rng,
-                              graph_output=graph_output)
+    return train_dbn(train_set, validation_set,
+                     batch_size=batch_size,
+                     k=k,
+                     layers_sizes=layers_sizes,
+                     pretraining_epochs=pretraining_epochs,
+                     pretrain_lr=pretrain_lr,
+                     lambda_1=lambda_1,
+                     lambda_2=lambda_2,
+                     rng=rng,
+                     graph_output=graph_output)
 
 def train_ME(datafile,
              rng,
@@ -268,16 +268,16 @@ def train_ME(datafile,
                                                        repeats=repeats,
                                                        datadir=datadir)
 
-    return train_bottom_layer(train_set, validation_set,
-                                batch_size=batch_size,
-                                k=k,
-                                layers_sizes=layers_sizes,
-                                pretraining_epochs=pretraining_epochs,
-                                pretrain_lr=pretrain_lr,
-                                lambda_1=lambda_1,
-                                lambda_2=lambda_2,
-                                rng=rng,
-                                graph_output=graph_output)
+    return train_dbn(train_set, validation_set,
+                     batch_size=batch_size,
+                     k=k,
+                     layers_sizes=layers_sizes,
+                     pretraining_epochs=pretraining_epochs,
+                     pretrain_lr=pretrain_lr,
+                     lambda_1=lambda_1,
+                     lambda_2=lambda_2,
+                     rng=rng,
+                     graph_output=graph_output)
 
 def prepare_AML_TCGA_datafiles(datadir='data'):
     datafiles = {

@@ -236,7 +236,7 @@ class DBN(object):
             return None
 
     def training_functions(self, train_set_x, batch_size, k,
-                           lambda_1 = 0.0, lambda_2 = 0.1,
+                           lambdas = [0.0, 0.1],
                            monitor=False):
         '''Generates a list of functions, for performing one step of
         gradient descent at a given layer. The function will require
@@ -254,12 +254,8 @@ class DBN(object):
         :type k: int
         :param k: number of Gibbs steps to do in CD-k / PCD-k
 
-        :type lambda_1: float
-        :param lambda_1: parameter for tuning weigths updates in CD-k/PCD-k
-                         of Bernoullian RBM
-
-        :type lambda_2: float
-        :param lambda_2: parameter for tuning weigths updates in CD-k/PCD-k
+        :type lambdas: list of float
+        :param lambdas: parameters for tuning weigths updates in CD-k/PCD-k
                          of Bernoullian RBM
 
         :type monitor: bool
@@ -283,8 +279,7 @@ class DBN(object):
             # TODO: change cost function to reconstruction error
             if isinstance(rbm, GRBM):
                 cost, updates = rbm.get_cost_updates(learning_rate,
-                                                     lambda_1=lambda_1,
-                                                     lambda_2 = lambda_2,
+                                                     lambdas=lambdas,
                                                      batch_size=batch_size,
                                                      persistent=None, k=k)
             else:
@@ -334,8 +329,7 @@ class DBN(object):
     def training(self, train_set_x,
                  batch_size, k,
                  pretraining_epochs, pretrain_lr,
-                 lambda_1 = 0.0,
-                 lambda_2 = 0.1,
+                 lambdas = [0.0, 0.1],
                  validation_set_x=None,
                  monitor=False, graph_output=False):
         '''
@@ -357,12 +351,8 @@ class DBN(object):
         :type pretrain_lr: float
         :param pretrain_lr: learning rate
 
-        :type lambda_1: float
-        :param lambda_1: parameter for tuning weigths updates in CD-k/PCD-k
-                         of Bernoullian RBM
-
-        :type lambda_2: float
-        :param lambda_2: parameter for tuning weigths updates in CD-k/PCD-k
+        :type lambdas: list of float
+        :param lambdas: parameters for tuning weigths updates in CD-k/PCD-k
                          of Bernoullian RBM
 
         :type validation_set_x: theano.tensor.TensorType
@@ -388,8 +378,7 @@ class DBN(object):
         training_fns, free_energy_gap_fns = self.training_functions(train_set_x=train_set_x,
                                                                        batch_size=batch_size,
                                                                        k=k,
-                                                                       lambda_1=lambda_1,
-                                                                       lambda_2=lambda_2,
+                                                                       lambdas=lambdas,
                                                                        monitor=monitor)
 
         print('... pre-training the model')

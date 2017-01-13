@@ -258,8 +258,7 @@ class RBM(object):
     def get_cost_updates(self,
                          lr=0.1,
                          k=1,
-                         lambda_1=0.0,
-                         lambda_2=0.0,
+                         lambdas= [0.0, 0.0],
                          weightcost = 0.0,
                          batch_size=None,
                          persistent=None,
@@ -275,10 +274,7 @@ class RBM(object):
                         of log-likelihood is used. Default is False and
                         RBM specific gradient computation is used.
 
-        :param lambda_1: parameter for tuning weigths updates in CD-k/PCD-k
-                         of Bernoullian RBM
-
-        :param lambda_2: parameter for tuning weigths updates in CD-k/PCD-k
+        :param lambdas: parameters for tuning weigths updates in CD-k/PCD-k
                          of Bernoullian RBM
 
         :param weightcost: L1 weight-decay (see Hinton 2010
@@ -346,13 +342,13 @@ class RBM(object):
 
         epsilon = 0.001
         # ISSUE: it returns Inf when Wij is small
-        gradients[0] = gradients[0] / tensor.cast(1 + 2 * lr * lambda_1 / (tensor.abs_(self.W)+epsilon),
+        gradients[0] = gradients[0] / tensor.cast(1 + 2 * lr * lambdas[0] / (tensor.abs_(self.W)+epsilon),
                                                    dtype=theano.config.floatX)
 
         # constructs the update dictionary
         multipliers = [
             # Issue: it returns Inf when Wij is small, therefore a small constant is added
-            (1 - 2 * lr * lambda_2) / (1 + 2 * lr * lambda_1 / (tensor.abs_(self.W) + epsilon)),
+            (1 - 2 * lr * lambdas[1]) / (1 + 2 * lr * lambdas[0] / (tensor.abs_(self.W) + epsilon)),
             1,1]
 
         for gradient, param, multiplier, param_speed in zip(
