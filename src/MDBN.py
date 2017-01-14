@@ -41,6 +41,7 @@ def train_dbn(train_set, validation_set,
               pretrain_lr=[0.005],
               lambdas = [0.01, 0.1],
               rng=None,
+              persistent=False,
               graph_output=False
               ):
     print('Visible nodes: %i' % train_set.get_value().shape[1])
@@ -55,6 +56,7 @@ def train_dbn(train_set, validation_set,
                  pretraining_epochs,
                  pretrain_lr,
                  lambdas,
+                 persistent=persistent,
                  validation_set_x=validation_set,
                  graph_output=graph_output)
 
@@ -100,15 +102,15 @@ def train_MDBN(datafiles,
     """
 
     if rng is None:
-        rng = numpy.random.RandomState(1234)
+        rng = numpy.random.RandomState(123)
 
     #################################
     #     Training the RBM          #
     #################################
 
     dbn_dict = dict()
-    output_t_set_list = []
-    output_v_set_list = []
+    output_t_list = []
+    output_v_list = []
 
     for key in config["pathways"]:
         print('*** Training on %s ***' % key)
@@ -119,7 +121,10 @@ def train_MDBN(datafiles,
                                                        datadir=datadir)
 
         netConfig = config[key]
-        dbn_dict[key], output_t_set, output_v_set = train_dbn(train_set, validation_set,
+        netConfig['inputNodes'] = train_set.get_value().shape[1]
+
+        dbn_dict[key], _, _ = train_dbn(train_set, validation_set,
+                                  gauss=True,
                                   batch_size=netConfig["batchSize"],
                                   k=netConfig["k"],
                                   layers_sizes=netConfig["layersNodes"],
@@ -127,22 +132,21 @@ def train_MDBN(datafiles,
                                   pretrain_lr=netConfig["lr"],
                                   lambdas=netConfig["lambdas"],
                                   rng=rng,
+                                  persistent=netConfig["persistent"],
                                   graph_output=graph_output)
-        netConfig['inputNodes'] = train_set.get_value().shape[1]
 
-        output_t_set, output_v_set = dbn_dict[key].MLP_output_from_datafile(datafiles[key],
-                                                                            holdout=holdout,
-                                                                            repeats=repeats)
-
-        output_t_set_list.append(output_t_set)
-        output_v_set_list.append(output_v_set)
+        output_t, output_v = dbn_dict[key].MLP_output_from_datafile(datafiles[key],
+                                                                    holdout=holdout,
+                                                                    repeats=repeats)
+        output_t_list.append(output_t)
+        output_v_list.append(output_v)
 
     print('*** Training on joint layer ***')
 
-    joint_train_set = theano.shared(numpy.concatenate(output_t_set_list,axis=1), borrow=True)
+    joint_train_set = theano.shared(numpy.hstack(output_t_list), borrow=True)
 
     if holdout > 0:
-        joint_val_set = theano.shared(numpy.concatenate(output_v_set_list,axis=1), borrow=True)
+        joint_val_set = theano.shared(numpy.hstack(output_v_list), borrow=True)
     else:
         joint_val_set = None
 
@@ -150,13 +154,14 @@ def train_MDBN(datafiles,
     netConfig['inputNodes'] = joint_train_set.get_value().shape[1]
 
     dbn_dict['top'], _, _ = train_dbn(joint_train_set, joint_val_set,
-                                      False,
+                                      gauss=False,
                                       batch_size=netConfig["batchSize"],
                                       k=netConfig["k"],
                                       layers_sizes=netConfig["layersNodes"],
                                       pretraining_epochs=netConfig["epochs"],
                                       pretrain_lr=netConfig["lr"],
                                       rng=rng,
+                                      persistent=netConfig["persistent"],
                                       graph_output=graph_output)
 
     # Identifying the classes
@@ -166,7 +171,7 @@ def train_MDBN(datafiles,
         dbn_output, _ = dbn_dict[key].MLP_output_from_datafile(datafiles[key])
         dbn_output_list.append(dbn_output)
 
-    joint_output = theano.shared(numpy.concatenate(dbn_output_list,axis=1), borrow=True)
+    joint_output = theano.shared(numpy.hstack(dbn_output_list), borrow=True)
 
     classes = dbn_dict['top'].get_output(joint_output)
 
@@ -217,7 +222,7 @@ def load_network(input_file, input_folder):
         dbn_dict[key] = DBN(n_ins=netConfig['inputNodes'],
                             hidden_layers_sizes=layer_sizes[:-1],
                             n_outs=layer_sizes[-1],
-                            W_list=params['W'],b_list=params['b'])
+                            W_list=params['W'],b_list=params['hbias'],c_list=params['vbias'])
 
     os.chdir(root_dir)
 

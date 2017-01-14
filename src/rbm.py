@@ -304,7 +304,8 @@ class RBM(object):
         if persistent is None:
             chain_start = ph_sample
         else:
-            chain_start = persistent
+            chain_start = persistent[:batch_size]
+
         # perform actual negative phase
         # in order to implement CD-k/PCD-k we need to scan over the
         # function that implements one gibbs step k times.
@@ -362,7 +363,7 @@ class RBM(object):
 
         if persistent:
             # Note that this works only if persistent is a shared variable
-            updates[persistent] = nh_samples[-1]
+            updates[persistent] = tensor.set_subtensor(persistent[:batch_size],nh_samples[-1])
             # pseudo-likelihood is a better proxy for PCD
             monitoring_cost = self.get_pseudo_likelihood_cost(updates)
         else:
@@ -482,7 +483,6 @@ class RBM(object):
                  learning_rate=0.1, k=1,
                  initial_momentum = 0.0, final_momentum = 0.0,
                  weightcost = 0.0,
-                 lambda_2 = 0.0,
                  persistent = True,
                  display_fn=None, graph_output=False):
 
@@ -699,15 +699,13 @@ class GRBM(RBM):
                  learning_rate=0.01, k=1,
                  initial_momentum = 0.0, final_momentum = 0.0,
                  weightcost = 0.0,
-                 lambda_1 = 0.0,
-                 lambda_2 = 0.1,
+                 lambdas = [0.0, 0.1],
                  persistent = False,
                  display_fn=None, graph_output=False):
 
         cost, updates = self.get_cost_updates(lr=learning_rate,
                                               k=k,
-                                              lambda_1=lambda_1,
-                                              lambda_2=lambda_2,
+                                              lambdas=lambdas,
                                               weightcost=weightcost,
                                               batch_size=batch_size
                                               )

@@ -64,7 +64,7 @@ class DBN(object):
     def __init__(self, numpy_rng=None, theano_rng=None, n_ins=784,
                  gauss=True,
                  hidden_layers_sizes=[400], n_outs=40,
-                 W_list=None, b_list=None):
+                 W_list=None, b_list=None, c_list=None):
         """This class is made to support a variable number of layers.
 
         :type numpy_rng: numpy.random.RandomState
@@ -94,8 +94,12 @@ class DBN(object):
                        None each matrix is randomly initialized
 
         :type b_list: list of numpy.ndarray
-        :param b_list: the list of biases vectors for each layer of the MLP; if
+        :param b_list: the list of biases vectors for each hidden layer of the MLP; if
                        None each vector is randomly initialized
+
+        :type c_list: list of numpy.ndarray
+        :param c_list: the list of visual nodes biases vectors for the RBMs; if
+                       None it is randomly initialized
         """
 
         self.n_ins = n_ins
@@ -165,33 +169,32 @@ class DBN(object):
             else:
                 b = b_list[i]
 
+            if c_list is None:
+                c = numpy.zeros((n_in,), dtype=theano.config.floatX)
+            else:
+                c = c_list[i]
+
             sigmoid_layer = HiddenLayer(rng=numpy_rng,
                                         input=layer_input,
                                         n_in=n_in,
                                         n_out=n_out,
                                         W=theano.shared(W,name='W',borrow=True),
-                                        b=theano.shared(b,name='b',borrow=True),
+                                        b=theano.shared(b,name='hbias',borrow=True),
                                         activation=tensor.nnet.sigmoid)
 
             # add the layer to our list of layers
             self.sigmoid_layers.append(sigmoid_layer)
 
-            # its arguably a philosophical question...  but we are
-            # going to only declare that the parameters of the
-            # sigmoid_layers are parameters of the DBN. The visible
-            # biases in the RBM are parameters of those RBMs, but not
-            # of the DBN.
-            self.params.extend(sigmoid_layer.params)
-
             # Construct an RBM that shared weights with this layer
             if i==0 and gauss:
                 rbm_layer = GRBM(numpy_rng=numpy_rng,
-                                theano_rng=theano_rng,
-                                input=layer_input,
-                                n_visible=input_size,
-                                n_hidden=self.stacked_layers_sizes[i],
-                                W=sigmoid_layer.W,
-                                hbias=sigmoid_layer.b)
+                                 theano_rng=theano_rng,
+                                 input=layer_input,
+                                 n_visible=input_size,
+                                 n_hidden=self.stacked_layers_sizes[i],
+                                 W=sigmoid_layer.W,
+                                 hbias=sigmoid_layer.b,
+                                 vbias=theano.shared(c,name='vbias',borrow=True))
             else:
                 rbm_layer = RBM(numpy_rng=numpy_rng,
                                 theano_rng=theano_rng,
@@ -199,7 +202,10 @@ class DBN(object):
                                 n_visible=input_size,
                                 n_hidden=self.stacked_layers_sizes[i],
                                 W=sigmoid_layer.W,
-                                hbias=sigmoid_layer.b)
+                                hbias=sigmoid_layer.b,
+                                vbias=theano.shared(c,name='vbias',borrow=True))
+
+            self.params.extend(rbm_layer.params)
 
             self.rbm_layers.append(rbm_layer)
 
@@ -235,8 +241,10 @@ class DBN(object):
         else:
             return None
 
-    def training_functions(self, train_set_x, batch_size, k,
+    def training_functions(self, train_set_x, k,
+                           max_batch_size=20,
                            lambdas = [0.0, 0.1],
+                           persistent=False,
                            monitor=False):
         '''Generates a list of functions, for performing one step of
         gradient descent at a given layer. The function will require
@@ -247,9 +255,6 @@ class DBN(object):
         :type train_set_x: theano.tensor.TensorType
         :param train_set_x: Shared var. that contains all datapoints used
                             for training the DBN
-
-        :type batch_size: int
-        :param batch_size: size of a [mini]batch
 
         :type k: int
         :param k: number of Gibbs steps to do in CD-k / PCD-k
@@ -266,14 +271,23 @@ class DBN(object):
         # index to a [mini]batch
         indexes = tensor.lvector('indexes')  # index to a minibatch
         learning_rate = tensor.scalar('lr', dtype=theano.config.floatX)  # learning rate to use
+        batch_size = tensor.iscalar('batch_size')
         momentum = tensor.scalar('momentum', dtype=theano.config.floatX)
-
-        # TODO: deal with batch_size of 1
-        assert batch_size > 1
 
         train_fns = []
         free_energy_gap_fns = []
+        persistent_chain = []
+
         for i, rbm in enumerate(self.rbm_layers):
+            # initialize storage for the persistent chain (state = hidden
+            # layer of chain) if persisten is True
+            if persistent:
+                persistent_chain.append(theano.shared(numpy.zeros((max_batch_size, rbm.n_hidden),
+                                                         dtype=theano.config.floatX),
+                                             borrow=True))
+            else:
+                persistent_chain.append(None)
+
             # get the cost and the updates list
             # using CD-k here (persisent=None) for training each RBM.
             # TODO: change cost function to reconstruction error
@@ -281,12 +295,14 @@ class DBN(object):
                 cost, updates = rbm.get_cost_updates(learning_rate,
                                                      lambdas=lambdas,
                                                      batch_size=batch_size,
-                                                     persistent=None, k=k)
+                                                     persistent=persistent_chain[i],
+                                                     k=k)
             else:
                 cost, updates = rbm.get_cost_updates(learning_rate,
                                                      weightcost = 0.0002,
                                                      batch_size=batch_size,
-                                                     persistent=None, k=k)
+                                                     persistent=persistent_chain[i],
+                                                     k=k)
 
             # compile the theano function
             if monitor:
@@ -295,7 +311,7 @@ class DBN(object):
                 mode = theano.config.mode
 
             fn = theano.function(
-                inputs=[indexes, momentum, theano.In(learning_rate)],
+                inputs=[indexes, momentum, theano.In(learning_rate), theano.In(batch_size)],
                 outputs=cost,
                 updates=updates,
                 givens={
@@ -330,6 +346,7 @@ class DBN(object):
                  batch_size, k,
                  pretraining_epochs, pretrain_lr,
                  lambdas = [0.0, 0.1],
+                 persistent=False,
                  validation_set_x=None,
                  monitor=False, graph_output=False):
         '''
@@ -376,10 +393,11 @@ class DBN(object):
             print('Validation set sample size %i' % validation_set_x.get_value().shape[0])
 
         training_fns, free_energy_gap_fns = self.training_functions(train_set_x=train_set_x,
-                                                                       batch_size=batch_size,
-                                                                       k=k,
-                                                                       lambdas=lambdas,
-                                                                       monitor=monitor)
+                                                                    k=k,
+                                                                    max_batch_size=batch_size,
+                                                                    lambdas=lambdas,
+                                                                    persistent=persistent,
+                                                                    monitor=monitor)
 
         print('... pre-training the model')
         start_time = timeit.default_timer()
@@ -394,13 +412,6 @@ class DBN(object):
             t_set = train_set_x.get_value(borrow=True)
             v_set = validation_set_x.get_value(borrow=True)
 
-        # early-stopping parameters
-
-        patience_increase = 2  # wait this much longer when a new best is
-        # found
-        improvement_threshold = 0.995  # a relative improvement of this much is
-        # considered significant
-
         # go through this many
         # minibatches before checking the network
         # on the validation set; in this case we
@@ -412,6 +423,8 @@ class DBN(object):
 
         n_train_batches = idx_minibatches[-1] + 1
 
+        print('Number of training batches: %d' % n_train_batches)
+
         for i in range(self.n_layers):
             if graph_output:
                 plt.figure(i+1)
@@ -422,15 +435,11 @@ class DBN(object):
                 momentum = 0.6
 
             # go through training epochs
-            best_cost = numpy.inf
             epoch = 0
-            done_looping = False
 
-            patience = pretraining_epochs[i]  # look as this many examples regardless
-            validation_frequency = min(20 * n_train_batches, patience // 2)
-            print('Validation frequency: %d' % validation_frequency)
+            minCost = numpy.inf
 
-            while (epoch < pretraining_epochs[i]) and (not done_looping):
+            while epoch < pretraining_epochs[i]:
                 epoch = epoch + 1
 
                 idx_minibatches, minibatches = get_minibatches_idx(n_data,
@@ -441,60 +450,55 @@ class DBN(object):
                 if not isinstance(self.rbm_layers[i], GRBM) and epoch == 6:
                     momentum = 0.9
 
+                costs=[]
                 for mb, minibatch in enumerate(minibatches):
-                    current_cost = training_fns[i](indexes=minibatch,
-                                                momentum=momentum,
-                                                lr=pretrain_lr[i])
-                    # iteration number
-                    iter = (epoch - 1) * n_train_batches + mb
+                    costs.append(training_fns[i](indexes=minibatch,
+                                                   momentum=momentum,
+                                                   lr=pretrain_lr[i],
+                                                   batch_size=len(minibatch)))
 
-                    if (iter + 1) % validation_frequency == 0:
-                        print('Pre-training cost (layer %i, epoch %d): ' % (i, epoch), end=' ')
-                        print(current_cost)
+                meanCost = -numpy.mean(costs)
+                print('Pre-training cost (layer %i, epoch %d): ' % (i, epoch), end=' ')
+                print(meanCost)
 
-                        # Plot the output
-                        if graph_output:
-                            plt.clf()
-                            training_output = self.get_output(train_set_x, i)
-                            plt.imshow(training_output, cmap='gray')
-                            plt.axis('tight')
-                            plt.title('epoch %d' % (epoch))
-                            plt.draw()
-                            plt.pause(1.0)
+                if meanCost < minCost:
+                    minCost = meanCost
+                    bestParams = dict()
+                    for p in self.rbm_layers[i].params:
+                        bestParams[p.name] = p.get_value()
 
-                        # if we got the best validation score until now
-                        if current_cost < best_cost:
-                            # improve patience if loss improvement is good enough
-                            if (
-                                    current_cost < best_cost *
-                                    improvement_threshold
-                            ):
-                                patience = max(patience, iter * patience_increase)
+                # Plot the output
+                if graph_output:
+                    plt.clf()
+                    training_output = self.get_output(train_set_x, i)
+                    plt.imshow(training_output, cmap='gray')
+                    plt.axis('tight')
+                    plt.title('epoch %d' % (epoch))
+                    plt.draw()
+                    plt.pause(1.0)
 
-                            best_cost = current_cost
-                            best_iter = iter
+                if validation_set_x is not None:
+                    # Compute the free energy gap
+                    if i == 0:
+                        input_t_set = t_set
+                        input_v_set = v_set
+                    else:
+                        input_t_set = self.get_output(
+                                        t_set[range(v_set.shape[0])], i-1)
+                        input_v_set = self.get_output(v_set, i-1)
 
-                            if validation_set_x is not None:
-                                # Compute the free energy gap
-                                if i == 0:
-                                    input_t_set = t_set
-                                    input_v_set = v_set
-                                else:
-                                    input_t_set = self.get_output(
-                                                    t_set[range(v_set.shape[0])], i-1)
-                                    input_v_set = self.get_output(v_set, i-1)
+                    free_energy_train, free_energy_test = free_energy_gap_fns[i](
+                                        input_t_set,
+                                        input_v_set)
+                    free_energy_gap = free_energy_test.mean() - free_energy_train.mean()
 
-                                free_energy_train, free_energy_test = free_energy_gap_fns[i](
-                                                    input_t_set,
-                                                    input_v_set)
-                                free_energy_gap = free_energy_test.mean() - free_energy_train.mean()
+                    print('Free energy gap (layer %i, epoch %i): ' % (i, epoch), end=' ')
+                    print(free_energy_gap)
 
-                                print('Free energy gap (layer %i, epoch %i): ' % (i, epoch), end=' ')
-                                print(free_energy_gap)
-
-                    if patience <= iter:
-                        done_looping = True
-                        break
+            print('Minimum cost', end=' '); print(minCost)
+            self.rbm_layers[i].W = theano.shared(numpy.asarray(bestParams['W'],dtype=theano.config.floatX))
+            self.rbm_layers[i].hbias = theano.shared(numpy.asarray(bestParams['hbias'], dtype=theano.config.floatX))
+            self.rbm_layers[i].vbias = theano.shared(numpy.asarray(bestParams['vbias'], dtype=theano.config.floatX))
 
             if graph_output:
                 plt.close()
@@ -547,57 +551,6 @@ class DBN(object):
         '''
         print(" output(s) value(s):", [output[0] for output in fn.outputs])
 
-def train_top(batch_size, graph_output, joint_train_set, joint_val_set, rng):
-    top_DBN = DBN(numpy_rng=rng, n_ins=joint_train_set.get_value().shape[1],
-                  gauss=False,
-                  hidden_layers_sizes=[24],
-                  n_outs=3)
-    top_DBN.training(joint_train_set,
-                     batch_size, k=1,
-                     pretraining_epochs=[800, 800],
-                     pretrain_lr=[0.1, 0.1],
-                     validation_set_x=joint_val_set,
-                     graph_output=graph_output)
-    return top_DBN
-
-
-def train_bottom_layer(train_set, validation_set,
-                       batch_size=20,
-                       k=1, layers_sizes=[40],
-                       pretraining_epochs=[800],
-                       pretrain_lr=[0.005],
-                       lambda_1 = 0.0,
-                       lambda_2 = 0.1,
-                       rng=None,
-                       graph_output=False
-                    ):
-
-    if rng is None:
-        rng = numpy.random.RandomState(123)
-
-    print('Visible nodes: %i' % train_set.get_value().shape[1])
-    print('Output nodes: %i' % layers_sizes[-1])
-    dbn = DBN(numpy_rng=rng, n_ins=train_set.get_value().shape[1],
-                  hidden_layers_sizes=layers_sizes[:-1],
-                  n_outs=layers_sizes[-1])
-
-    dbn.training(train_set,
-                 batch_size, k=k,
-                 pretraining_epochs=pretraining_epochs,
-                 pretrain_lr=pretrain_lr,
-                 lambda_1=lambda_1,
-                 lambda_2=lambda_2,
-                 validation_set_x=validation_set,
-                 graph_output=graph_output)
-
-    output_train_set = dbn.get_output(train_set)
-    if validation_set is not None:
-        output_val_set = dbn.get_output(validation_set)
-    else:
-        output_val_set = None
-
-    return dbn, output_train_set, output_val_set
-
 def train_MNIST_Gaussian(graph_output=False):
     # Load the data
     mnist = MNIST()
@@ -630,8 +583,7 @@ def train_MNIST_Gaussian(graph_output=False):
                  batch_size, k=k,
                  pretraining_epochs=pretraining_epochs,
                  pretrain_lr=pretrain_lr,
-                 lambda_1=lambda_1,
-                 lambda_2=lambda_2,
+                 lambdas=[lambda_1,lambda_2],
                  validation_set_x=validation_set,
                  graph_output=graph_output)
 
