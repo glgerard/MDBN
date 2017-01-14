@@ -1,4 +1,6 @@
 {
+  "seed": 1234,
+  "runs": 10,
   "pathways": ["ME", "GE", "SM"],
   "ME":
   {

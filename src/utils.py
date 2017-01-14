@@ -51,15 +51,15 @@ def import_TCGA_data(file, datadir, dtype):
     os.chdir(root_dir)
     return (data.shape[1], ncols-1, data)
 
-def get_minibatches_idx(n, batch_size, shuffle=False):
+def get_minibatches_idx(n, batch_size, rng=None):
     """
     Used to shuffle the dataset at each iteration.
     """
 
     idx_list = numpy.arange(n, dtype="int32")
 
-    if shuffle:
-        numpy.random.shuffle(idx_list)
+    if rng:
+        rng.shuffle(idx_list)
 
     minibatches = []
     minibatch_start = 0
@@ -81,7 +81,7 @@ def load_n_preprocess_data(datafile,
                            transform_fn=None,
                            exponent=1.0,
                            repeats=10,
-                           shuffle=True,
+                           rng=None,
                            datadir='data'):
     # Load the data, each column is a single person
     # Pass to a row representation, i.e. the data for each person is now on a
@@ -108,7 +108,7 @@ def load_n_preprocess_data(datafile,
 
     # pre shuffle the data if we have a validation set
     _, indexes = get_minibatches_idx(n_cols, n_cols -
-                                     validation_set_size, shuffle = shuffle)
+                                     validation_set_size, rng=rng)
 
     train_set = theano.shared(zdata[indexes[0]], borrow=True)
     if validation_set_size > 0:

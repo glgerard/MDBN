@@ -117,6 +117,9 @@ class DBN(object):
         if theano_rng is None:
             theano_rng = RandomStreams(numpy_rng.randint(2 ** 30))
 
+        self.numpy_rng = numpy_rng
+        self.theano_rng = theano_rng
+
         # allocate symbolic variables for the data
 
         # the data is presented as rasterized images
@@ -348,7 +351,9 @@ class DBN(object):
                  lambdas = [0.0, 0.1],
                  persistent=False,
                  validation_set_x=None,
-                 monitor=False, graph_output=False):
+                 verbose=False,
+                 monitor=False,
+                 graph_output=False):
         '''
         Run the DBN pretraining.
 
@@ -419,7 +424,7 @@ class DBN(object):
 
         idx_minibatches, minibatches = get_minibatches_idx(n_data,
                                                            batch_size,
-                                                           shuffle=True)
+                                                           self.numpy_rng)
 
         n_train_batches = idx_minibatches[-1] + 1
 
@@ -444,7 +449,7 @@ class DBN(object):
 
                 idx_minibatches, minibatches = get_minibatches_idx(n_data,
                                                                    batch_size,
-                                                                   shuffle=True)
+                                                                   self.numpy_rng)
 
                 # go through the training set
                 if not isinstance(self.rbm_layers[i], GRBM) and epoch == 6:
@@ -458,10 +463,15 @@ class DBN(object):
                                                    batch_size=len(minibatch)))
 
                 meanCost = -numpy.mean(costs)
-                print('Pre-training cost (layer %i, epoch %d): ' % (i, epoch), end=' ')
-                print(meanCost)
+                if verbose:
+                    print('Pre-training cost (layer %i, epoch %d): ' % (i, epoch), end=' ')
+                    print(meanCost)
+                else:
+                    print('.',end='')
 
                 if meanCost < minCost:
+                    print('\nMinimum cost (layer %i, epoch %d): ' % (i, epoch), end=' ')
+                    print(meanCost)
                     minCost = meanCost
                     bestParams = dict()
                     for p in self.rbm_layers[i].params:
@@ -492,10 +502,10 @@ class DBN(object):
                                         input_v_set)
                     free_energy_gap = free_energy_test.mean() - free_energy_train.mean()
 
-                    print('Free energy gap (layer %i, epoch %i): ' % (i, epoch), end=' ')
+                    print('\nFree energy gap (layer %i, epoch %i): ' % (i, epoch), end=' ')
                     print(free_energy_gap)
 
-            print('Minimum cost', end=' '); print(minCost)
+            print('\nMinimum cost', end=' '); print(minCost)
             self.rbm_layers[i].W = theano.shared(numpy.asarray(bestParams['W'],dtype=theano.config.floatX))
             self.rbm_layers[i].hbias = theano.shared(numpy.asarray(bestParams['hbias'], dtype=theano.config.floatX))
             self.rbm_layers[i].vbias = theano.shared(numpy.asarray(bestParams['vbias'], dtype=theano.config.floatX))
@@ -523,7 +533,6 @@ class DBN(object):
                                                            transform_fn=transform_fn,
                                                            exponent=exponent,
                                                            repeats=repeats,
-                                                           shuffle=False,
                                                            datadir=datadir)
 
         return (self.get_output(train_set), self.get_output(validation_set))

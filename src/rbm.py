@@ -91,6 +91,9 @@ class RBM(object):
         if theano_rng is None:
             theano_rng = RandomStreams(numpy_rng.randint(2 ** 30))
 
+        self.numpy_rng = numpy_rng
+        self.theano_rng = theano_rng
+
         if W is None:
             # W is initialized with `initial_W` which is uniformely
             # sampled from -4*sqrt(6./(n_visible+n_hidden)) and
@@ -582,7 +585,7 @@ class RBM(object):
 
             _, minibatches = get_minibatches_idx(n_train_data,
                                                  batch_size,
-                                                 shuffle=True)
+                                                 self.numpy_rng)
 
             # go through the training set
             mean_cost = []

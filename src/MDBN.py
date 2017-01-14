@@ -42,6 +42,7 @@ def train_dbn(train_set, validation_set,
               lambdas = [0.01, 0.1],
               rng=None,
               persistent=False,
+              verbose=False,
               graph_output=False
               ):
     print('Visible nodes: %i' % train_set.get_value().shape[1])
@@ -57,6 +58,7 @@ def train_dbn(train_set, validation_set,
                  pretrain_lr,
                  lambdas,
                  persistent=persistent,
+                 verbose=verbose,
                  validation_set_x=validation_set,
                  graph_output=graph_output)
 
@@ -73,6 +75,7 @@ def train_MDBN(datafiles,
                datadir='data',
                holdout=0,
                repeats=1,
+               verbose=False,
                graph_output=False,
                output_folder='MDBN_run',
                output_file='parameters_and_classes.npz',
@@ -118,7 +121,8 @@ def train_MDBN(datafiles,
         train_set, validation_set = load_n_preprocess_data(datafiles[key],
                                                        holdout=holdout,
                                                        repeats=repeats,
-                                                       datadir=datadir)
+                                                       datadir=datadir,
+                                                       rng=rng)
 
         netConfig = config[key]
         netConfig['inputNodes'] = train_set.get_value().shape[1]
@@ -133,6 +137,7 @@ def train_MDBN(datafiles,
                                   lambdas=netConfig["lambdas"],
                                   rng=rng,
                                   persistent=netConfig["persistent"],
+                                  verbose=verbose,
                                   graph_output=graph_output)
 
         output_t, output_v = dbn_dict[key].MLP_output_from_datafile(datafiles[key],
@@ -162,6 +167,7 @@ def train_MDBN(datafiles,
                                       pretrain_lr=netConfig["lr"],
                                       rng=rng,
                                       persistent=netConfig["persistent"],
+                                      verbose=verbose,
                                       graph_output=graph_output)
 
     # Identifying the classes
