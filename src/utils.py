@@ -175,3 +175,8 @@ def find_unique_classes(dbn_output):
                              (numpy.sum(dbn_output == pattern, axis=1) == output_nodes) * idx
 
     return classified_samples, distance_matrix
+
+def usage():
+    print("--help usage summary")
+    print("--config=filename configuration file")
+    print("--verbose print additional information during training")

@@ -8,6 +8,7 @@ import getopt
 from MDBN import train_MDBN
 
 from utils import find_unique_classes
+from utils import usage
 
 def prepare_AML_TCGA_datafiles(config):
 
@@ -16,11 +17,6 @@ def prepare_AML_TCGA_datafiles(config):
         datafiles[key] = config[key]["datafile"]
 
     return datafiles
-
-def usage():
-    print("--help usage summary")
-    print("--config=filename configuration file")
-    print("--verbose print additional information during training")
 
 def main(argv):
     config_dir = 'config/'
