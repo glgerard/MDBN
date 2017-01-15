@@ -351,6 +351,7 @@ class DBN(object):
                  lambdas = [0.0, 0.1],
                  persistent=False,
                  validation_set_x=None,
+                 run=0,
                  verbose=False,
                  monitor=False,
                  graph_output=False):
@@ -505,7 +506,7 @@ class DBN(object):
                     print('\nFree energy gap (layer %i, epoch %i): ' % (i, epoch), end=' ')
                     print(free_energy_gap)
 
-            print('\nMinimum cost', end=' '); print(minCost)
+            print('\n*** Run %i - Minimum cost %f' % (run, minCost))
             self.rbm_layers[i].W = theano.shared(numpy.asarray(bestParams['W'],dtype=theano.config.floatX))
             self.rbm_layers[i].hbias = theano.shared(numpy.asarray(bestParams['hbias'], dtype=theano.config.floatX))
             self.rbm_layers[i].vbias = theano.shared(numpy.asarray(bestParams['vbias'], dtype=theano.config.floatX))

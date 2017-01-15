@@ -41,6 +41,7 @@ def train_dbn(train_set, validation_set,
               pretrain_lr=[0.005],
               lambdas = [0.01, 0.1],
               rng=None,
+              run=0,
               persistent=False,
               verbose=False,
               graph_output=False
@@ -58,6 +59,7 @@ def train_dbn(train_set, validation_set,
                  pretrain_lr,
                  lambdas,
                  persistent=persistent,
+                 run=run,
                  verbose=verbose,
                  validation_set_x=validation_set,
                  graph_output=graph_output)
@@ -75,6 +77,7 @@ def train_MDBN(datafiles,
                datadir='data',
                holdout=0,
                repeats=1,
+               run=0,
                verbose=False,
                graph_output=False,
                output_folder='MDBN_run',
@@ -116,7 +119,7 @@ def train_MDBN(datafiles,
     output_v_list = []
 
     for key in config["pathways"]:
-        print('*** Training on %s ***' % key)
+        print('*** Run %i - Training on %s ***' % (run, key))
 
         train_set, validation_set = load_n_preprocess_data(datafiles[key],
                                                        holdout=holdout,
@@ -137,6 +140,7 @@ def train_MDBN(datafiles,
                                   lambdas=netConfig["lambdas"],
                                   rng=rng,
                                   persistent=netConfig["persistent"],
+                                  run=run,
                                   verbose=verbose,
                                   graph_output=graph_output)
 
@@ -146,7 +150,7 @@ def train_MDBN(datafiles,
         output_t_list.append(output_t)
         output_v_list.append(output_v)
 
-    print('*** Training on joint layer ***')
+    print('*** Run %i - Training on joint layer ***' % run)
 
     joint_train_set = theano.shared(numpy.hstack(output_t_list), borrow=True)
 
@@ -167,6 +171,7 @@ def train_MDBN(datafiles,
                                       pretrain_lr=netConfig["lr"],
                                       rng=rng,
                                       persistent=netConfig["persistent"],
+                                      run=run,
                                       verbose=verbose,
                                       graph_output=graph_output)
 

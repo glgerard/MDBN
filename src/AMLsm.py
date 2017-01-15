@@ -57,20 +57,21 @@ def main(argv):
 
     for i in range(config["runs"]):
         run_start_date = datetime.datetime.now()
+        print('*** Run %i started at %s' % (i, run_start_date.strftime("%H:%M:%S on %B %d, %Y")))
         dbn_output = train_MDBN(datafiles,
                                 config,
                                 output_folder=output_dir,
                                 output_file='Exp_%s_run_%d.npz' %
                                             (batch_start_date_str, i),
                                 holdout=0.0, repeats=1,
+                                run=i,
                                 verbose=verbose,
                                 rng=numpy_rng)
         current_date_time = datetime.datetime.now()
-        print('*** Run %i started at %s' % (i, run_start_date.strftime("%H:%M:%S on %B %d, %Y")))
-        print('*** Run %i completed at %s' % (i, current_date_time.strftime("%H:%M:%S on %B %d, %Y")))
         classes = find_unique_classes((dbn_output > 0.5) * numpy.ones_like(dbn_output))
-        print('*** Identified %d ' % numpy.max(classes[0]))
+        print('*** Run %i identified %d classes' % (i,numpy.max(classes[0])))
         results.append(classes[0])
+        print('*** Run %i completed at %s' % (i, current_date_time.strftime("%H:%M:%S on %B %d, %Y")))
 
     root_dir = os.getcwd()
     os.chdir(output_dir)
