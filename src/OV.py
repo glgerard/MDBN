@@ -71,7 +71,7 @@ def main(argv):
     os.mkdir(output_dir)
 
     results = []
-    for i in range(1):
+    for i in range(config["runs"]):
         run_start_date = datetime.datetime.now()
         print('*** Run %i started at %s' % (i, run_start_date.strftime("%H:%M:%S on %B %d, %Y")))
         dbn_output = train_MDBN(datafiles,

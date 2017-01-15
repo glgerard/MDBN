@@ -232,6 +232,7 @@ def load_network(input_file, input_folder):
         layer_sizes = netConfig['layersNodes']
         dbn_dict[key] = DBN(n_ins=netConfig['inputNodes'],
                             hidden_layers_sizes=layer_sizes[:-1],
+                            gauss=key!='top',
                             n_outs=layer_sizes[-1],
                             W_list=params['W'],b_list=params['hbias'],c_list=params['vbias'])
 

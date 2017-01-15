@@ -627,6 +627,115 @@ class RBM(object):
         if graph_output:
             plt.close(fig)
 
+
+    def sampling(self, n_samples, persistent_vis_chain):
+        """
+        Sampling from the RBM.
+
+        :param n_samples:
+        :param persistent_vis_chain
+        :return:
+        """
+
+        plot_every = 500
+        # define one step of Gibbs sampling define a
+        # function that does `plot_every` steps before returning the
+        # sample for plotting
+        (
+            [
+                presig_hids,
+                hid_mfs,
+                hid_samples,
+                presig_vis,
+                vis_mfs,
+                vis_samples
+            ],
+            updates
+        ) = theano.scan(
+            self.gibbs_vhv,
+            outputs_info=[None, None, None, None, None, persistent_vis_chain],
+            n_steps=plot_every,
+            name="gibbs_vhv"
+        )
+        # add to updates the shared variable that takes care of our persistent
+        # chain :.
+        updates.update({persistent_vis_chain: vis_samples[-1]})
+        # construct the function that implements our persistent chain.
+        # we generate the "mean field" activations for plotting and the actual
+        # samples for reinitializing the state of our persistent chain
+        sample_fn = theano.function(
+            [],
+            [
+                vis_mfs[-1],
+                vis_samples[-1]
+            ],
+            updates=updates,
+            name='sample_fn'
+        )
+        samples = []
+        for idx in range(n_samples):
+            # generate `plot_every` intermediate samples that we discard,
+            # because successive samples in the chain are too correlated
+            print(' ... computing sample %d' % idx)
+            vis_mf, vis_sample = sample_fn()
+            samples.append(vis_mf)
+
+        return samples
+
+    def reverse_sampling(self, n_samples, persistent_hid_chain):
+        """
+        Sampling from the RBM.
+
+        :param n_samples:
+        :param persistent_hid_chain
+        :return:
+        """
+
+        plot_every = 500
+        # define one step of Gibbs sampling define a
+        # function that does `plot_every` steps before returning the
+        # sample for plotting
+        (
+            [
+                presig_vis,
+                vis_mfs,
+                vis_samples,
+                presig_hids,
+                hid_mfs,
+                hid_samples
+            ],
+            updates
+        ) = theano.scan(
+            self.gibbs_hvh,
+            outputs_info=[None, None, None, None, None, persistent_hid_chain],
+            n_steps=plot_every,
+            name="gibbs_hvh"
+        )
+        # add to updates the shared variable that takes care of our persistent
+        # chain :.
+        updates.update({persistent_hid_chain: hid_samples[-1]})
+        # construct the function that implements our persistent chain.
+        # we generate the "mean field" activations for plotting and the actual
+        # samples for reinitializing the state of our persistent chain
+        sample_fn = theano.function(
+            [],
+            [
+                vis_mfs[-1],
+                vis_samples[-1]
+            ],
+            updates=updates,
+            name='sample_fn'
+        )
+        samples = []
+        for idx in range(n_samples):
+            # generate `plot_every` intermediate samples that we discard,
+            # because successive samples in the chain are too correlated
+            print(' ... computing sample %d' % idx)
+            vis_mf, vis_sample = sample_fn()
+            samples.append(vis_mf)
+
+        return samples
+
 class GRBM(RBM):
     # Implement a Gaussian-Bernoulli Restricted Boltzmann Machine
     def __init__(self,
@@ -800,9 +909,6 @@ def test(class_to_test=RBM,
                  display_fn=mnist.display_weigths,
                  graph_output=True)
 
-    #################################
-    #     Sampling from the RBM     #
-    #################################
 
     # pick random test examples, with which to initialize the persistent chain
     test_idx = rng.randint(number_of_test_samples - n_chains)
@@ -812,56 +918,16 @@ def test(class_to_test=RBM,
             dtype=theano.config.floatX
         )
     )
-    plot_every = 500
-    # define one step of Gibbs sampling define a
-    # function that does `plot_every` steps before returning the
-    # sample for plotting
-    (
-        [
-            presig_hids,
-            hid_mfs,
-            hid_samples,
-            presig_vis,
-            vis_mfs,
-            vis_samples
-        ],
-        updates
-    ) = theano.scan(
-        rbm.gibbs_vhv,
-        outputs_info=[None, None, None, None, None, persistent_vis_chain],
-        n_steps=plot_every,
-        name="gibbs_vhv"
-    )
 
-    # add to updates the shared variable that takes care of our persistent
-    # chain :.
-    updates.update({persistent_vis_chain: vis_samples[-1]})
-    # construct the function that implements our persistent chain.
-    # we generate the "mean field" activations for plotting and the actual
-    # samples for reinitializing the state of our persistent chain
-    sample_fn = theano.function(
-        [],
-        [
-            vis_mfs[-1],
-            vis_samples[-1]
-        ],
-        updates=updates,
-        name='sample_fn'
-    )
-
-    samples = []
-    for idx in range(n_samples):
-        # generate `plot_every` intermediate samples that we discard,
-        # because successive samples in the chain are too correlated
-        print(' ... computing sample %d' % idx)
-        vis_mf, vis_sample = sample_fn()
-        samples.append(vis_mf)
+    samples = rbm.sampling(n_samples, persistent_vis_chain)
 
     # construct image
     Y = mnist.display_samples(samples)
     scipy.misc.imsave('samples.png', Y)
 
     os.chdir(root_dir)
+
+
 
 if __name__ == '__main__':
     test(class_to_test=RBM, training_epochs=8)

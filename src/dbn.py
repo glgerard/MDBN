@@ -189,7 +189,8 @@ class DBN(object):
             self.sigmoid_layers.append(sigmoid_layer)
 
             # Construct an RBM that shared weights with this layer
-            if i==0 and gauss:
+            if (i==0) and gauss:
+                print('Gaussian Layer %i' % i)
                 rbm_layer = GRBM(numpy_rng=numpy_rng,
                                  theano_rng=theano_rng,
                                  input=layer_input,
@@ -199,6 +200,7 @@ class DBN(object):
                                  hbias=sigmoid_layer.b,
                                  vbias=theano.shared(c,name='vbias',borrow=True))
             else:
+                print('Bernoullian Layer %i' % i)
                 rbm_layer = RBM(numpy_rng=numpy_rng,
                                 theano_rng=theano_rng,
                                 input=layer_input,
