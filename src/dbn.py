@@ -190,7 +190,6 @@ class DBN(object):
 
             # Construct an RBM that shared weights with this layer
             if (i==0) and gauss:
-                print('Gaussian Layer %i' % i)
                 rbm_layer = GRBM(numpy_rng=numpy_rng,
                                  theano_rng=theano_rng,
                                  input=layer_input,
@@ -200,7 +199,6 @@ class DBN(object):
                                  hbias=sigmoid_layer.b,
                                  vbias=theano.shared(c,name='vbias',borrow=True))
             else:
-                print('Bernoullian Layer %i' % i)
                 rbm_layer = RBM(numpy_rng=numpy_rng,
                                 theano_rng=theano_rng,
                                 input=layer_input,
@@ -294,8 +292,6 @@ class DBN(object):
                 persistent_chain.append(None)
 
             # get the cost and the updates list
-            # using CD-k here (persisent=None) for training each RBM.
-            # TODO: change cost function to reconstruction error
             if isinstance(rbm, GRBM):
                 cost, updates = rbm.get_cost_updates(learning_rate,
                                                      lambdas=lambdas,

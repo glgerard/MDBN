@@ -104,7 +104,6 @@ def train_MDBN(datafiles,
 
     :param rng: random number generator, by default is None and it is initialized
                 by the function
-
     """
 
     if rng is None:

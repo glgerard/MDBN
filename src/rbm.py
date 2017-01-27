@@ -265,17 +265,13 @@ class RBM(object):
                          weightcost = 0.0,
                          batch_size=None,
                          persistent=None,
-                         symbolic_grad=False
+                         automated_grad=False
                          ):
         """This functions implements one step of CD-k or PCD-k
 
         :param lr: learning rate used to train the RBM
 
         :param k: number of Gibbs steps to do in CD-k/PCD-k
-
-        :param symbolic_grad: boolean set to True when symbolic gradient
-                        of log-likelihood is used. Default is False and
-                        RBM specific gradient computation is used.
 
         :param lambdas: parameters for tuning weigths updates in CD-k/PCD-k
                          of Bernoullian RBM
@@ -290,11 +286,13 @@ class RBM(object):
             containing archived state of Gibbs chain. This must be a shared
             variable of size (batch size, number of hidden units).
 
+        :param symbolic_grad: True if Theano automated gradient is
+            used instead of CD. Default is False.
+
         :return: Returns a proxy for the cost and the updates dictionary. The
         dictionary contains the update rules for weights and biases but
         also an update of the shared variable used to store the persistent
         chain, if one is used.
-
         """
 
         self.Wt = self.W.T
@@ -338,7 +336,7 @@ class RBM(object):
         # note that we only need the sample at the end of the chain
         chain_end = nv_samples[-1]
 
-        if symbolic_grad:
+        if automated_grad:
             gradients = self.compute_symbolic_grad(chain_end)
         else:
             gradients = self.compute_rbm_grad(batch_size, ph_mean, nh_means[-1], nv_means[-1],
@@ -764,7 +762,6 @@ class GRBM(RBM):
             v1_sample = v1_mean + self.theano_rng.normal(size=v1_mean.shape,
                                                avg=0, std=1.0,
                                                dtype=theano.config.floatX)
-
         return [v1_mean, v1_mean, v1_sample]
 
     def gibbs_hvh(self, h0_sample):
